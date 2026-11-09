@@ -37,8 +37,12 @@ export default function TrackList({
   const query = search.trim().toLocaleLowerCase();
   const matches = tracks
     .map((track, index) => ({ track, position: index + 1 }))
-    .filter(({ track }) => [trackName(track), metadata[track.id]?.title, metadata[track.id]?.artist, metadata[track.id]?.album]
-      .some((value) => value?.toLocaleLowerCase().includes(query)));
+    .filter(({ track }) => {
+      const tags = metadata[track.id];
+      return [trackName(track), tags?.title, tags?.artist, tags?.album, tags?.genre, tags?.comment, tags?.lyrics,
+        tags?.generator?.name]
+        .some((value) => value?.toLocaleLowerCase().includes(query));
+    });
   const displayedCount = query ? matches.length : tracks.length;
 
   return (
@@ -78,7 +82,7 @@ export default function TrackList({
             const tags = metadata[id];
             const details = track.missing
               ? "File not found"
-              : [tags?.artist, tags?.album].filter(Boolean).join(" · ");
+              : [tags?.generator?.name, tags?.artist, tags?.album, tags?.genre].filter(Boolean).join(" · ");
             const favorite = favorites.has(id);
             return (
               <li className="track-row" key={id} data-missing={track.missing || undefined}>

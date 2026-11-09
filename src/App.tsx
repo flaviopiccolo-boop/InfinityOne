@@ -16,7 +16,7 @@ import { useTrackMetadata } from "./hooks/useTrackMetadata";
 import { loadPlaybackPosition } from "./lib/playbackPosition";
 import { findSmartPlaylist, nowInSeconds } from "./lib/smartPlaylists";
 import { trackName, trackTitle, withoutTrack, withTrack } from "./lib/tracks";
-import type { Playlist, Queue, SavedLibrary, Track, TrackId, View } from "./types";
+import type { Playlist, Queue, SavedLibrary, Track, TrackId, View, WatchedFolder } from "./types";
 import "./App.css";
 
 export default function App() {
@@ -35,6 +35,7 @@ export default function App() {
   const library = useLibrary({
     onLoaded: restorePlayback,
     onLoadError: () => status.setError("Could not load the library."),
+    onTracksAdded: (tracks) => status.setNotice(`Added ${tracks.length} new ${tracks.length === 1 ? "track" : "tracks"} from a watched folder.`),
   });
   const trackIds = library.tracks.map((track) => track.id);
   const queue = useQueue({ tracks: trackIds, active: player.active, selectTrack: player.selectTrack });
@@ -137,6 +138,22 @@ export default function App() {
     }, "Could not remove the track.");
   }
 
+  async function addWatchedFolder() {
+    status.setNotice("");
+    await status.run(async () => {
+      const selected = await open({ title: "Watch a folder", directory: true });
+      if (!selected) return;
+      await library.addWatchedFolder(selected);
+      status.setNotice("Watching the folder. New MP3, WAV, and ZIP files are imported automatically.");
+    }, (cause) => `Could not watch the folder. ${typeof cause === "string" ? cause : "Try again."}`);
+  }
+
+  async function removeWatchedFolder(folder: WatchedFolder) {
+    if (busy) return;
+    status.setNotice("");
+    await status.run(() => library.removeWatchedFolder(folder.id), "Could not stop watching the folder.");
+  }
+
   function editPlaylist(item?: Playlist) {
     setEditor({ id: item?.id ?? "new", name: item?.name ?? "" });
     status.setError("");
@@ -231,7 +248,8 @@ export default function App() {
       <TitleBar search={search} onSearch={setSearch} />
       <Sidebar view={view} playlists={library.playlists} loading={library.loading} busy={busy} editor={editor}
         onNavigate={navigate} onNewPlaylist={() => editPlaylist()} onSavePlaylist={savePlaylist}
-        onCancelEdit={() => setEditor(undefined)} />
+        onCancelEdit={() => setEditor(undefined)} watchedFolders={library.watchedFolders}
+        onAddFolder={() => void addWatchedFolder()} onRemoveFolder={(folder) => void removeWatchedFolder(folder)} />
       <main className="workspace">
         <CollectionHeader view={view} playlist={playlist} trackCount={visibleIds.length}
           loading={library.loading} busy={busy} importingArchive={importingArchive}
@@ -247,7 +265,7 @@ export default function App() {
           onRemove={(track) => void removeTrack(track)} onRate={rate} />
       </main>
       <NowPanel active={active} title={active ? title(active) : undefined}
-        artist={artist} cover={cover} onCoverError={clearCover}
+        artist={artist} tags={active ? metadata[active] : undefined} cover={cover} onCoverError={clearCover}
         favorite={active !== undefined && favorites.has(active)} busy={busy}
         rating={active !== undefined ? tracksById.get(active)?.rating ?? null : null} onRate={rate} onToggleFavorite={toggleFavorite}
         upcoming={queue.upcomingTracks.slice(0, 3).map((id) => ({ id, title: title(id) }))}

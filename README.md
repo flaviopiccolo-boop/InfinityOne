@@ -28,6 +28,16 @@ Use **Search tracks** to filter the current library or playlist. Open the track�
 
 To remove a track from the library, open its **More actions** menu and choose **Remove from library**. This also removes it from your playlists and Favorites, but the audio file stays on disk. Open a playlist and choose **Delete playlist** to delete it; its tracks stay in your library. Tracks whose file was moved or deleted are dimmed and marked **File not found**.
 
+## Watched folders
+
+Select **+** beside **Watched folders** in the sidebar and choose a folder, such as the one your browser downloads Suno or Flow Music tracks to. Infinity One imports the MP3, WAV, and ZIP files already in it, then keeps importing new ones while the app is open and the next time it starts. Subfolders are not watched. A file is imported once it has stopped changing for 2 seconds; unfinished browser downloads (such as `.crdownload` or `.part` files) are skipped.
+
+Each file is imported only once, so a track you remove from the library is not imported again unless the file changes. Stopping watching a folder keeps the tracks already imported from it.
+
+## Tags from music generators
+
+Besides title, artist, and album, Infinity One reads the genre, comment, and lyrics tags. Generators often put the prompt or style description in the comment. Search matches all of these. When a tag names Suno, Udio, Google Flow Music, or Riffusion, the track shows **Made with …** and the generator appears in its caption. Open **Description** or **Lyrics** under **Now Playing** to read them.
+
 ## Ratings and smart playlists
 
 Rate a track from 1 to 5 stars with the stars beside it or under **Now Playing**. Select the current rating again to clear it. While a track plays, press **1**–**5** to rate it or **0** to clear the rating; hold **Shift** to rate and skip to the next track. This makes it quick to sort through a new batch: open **Unrated**, start playing, and rate each track as you go.

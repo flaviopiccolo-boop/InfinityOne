@@ -1,10 +1,13 @@
 import Rating from "./Rating";
+import type { TrackMetadata } from "../hooks/useTrackMetadata";
 import type { TrackId } from "../types";
 
 type NowPanelProps = {
   active: TrackId | undefined;
   title: string | undefined;
   artist: string | null | undefined;
+  /** Tags of the active track, for its details. */
+  tags: TrackMetadata | undefined;
   cover: string | undefined;
   onCoverError: () => void;
   favorite: boolean;
@@ -20,7 +23,7 @@ type NowPanelProps = {
 };
 
 export default function NowPanel({
-  active, title, artist, cover, onCoverError, favorite, rating, onRate, busy, onToggleFavorite,
+  active, title, artist, tags, cover, onCoverError, favorite, rating, onRate, busy, onToggleFavorite,
   upcoming, queueOpen, onToggleQueue, onSelect,
 }: NowPanelProps) {
   return (
@@ -45,6 +48,28 @@ export default function NowPanel({
             </button>
           )}
         </div>
+        {tags && (tags.generator || tags.genre || tags.comment || tags.lyrics) && (
+          <div className="now-info">
+            {(tags.generator || tags.genre) && (
+              <p className="now-tags">
+                {tags.generator && <span className="tag-chip" title={tags.generator.url ?? undefined}>Made with {tags.generator.name}</span>}
+                {tags.genre && <span className="tag-chip">{tags.genre}</span>}
+              </p>
+            )}
+            {tags.comment && (
+              <details>
+                <summary>Description</summary>
+                <p className="now-text">{tags.comment}</p>
+              </details>
+            )}
+            {tags.lyrics && (
+              <details>
+                <summary>Lyrics</summary>
+                <p className="now-text">{tags.lyrics}</p>
+              </details>
+            )}
+          </div>
+        )}
         <div className="now-queue">
           <div className="section-heading">
             <h2>Up next</h2>

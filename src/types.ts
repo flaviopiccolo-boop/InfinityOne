@@ -23,4 +23,6 @@ export type SmartView = "unrated" | "top-rated" | "recent" | "most-played" | "ne
 export type View = number | "favorites" | SmartView;
 export type Queue = { id: View; tracks: TrackId[] };
 export type RepeatMode = "off" | "all" | "one";
+/** A folder whose new MP3, WAV, and ZIP files are imported automatically. */
+export type WatchedFolder = { id: number; path: string };
 export type ImportedArchive = { tracks: Track[]; added: number };

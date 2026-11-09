@@ -1,11 +1,14 @@
 import { useEffect, useEffectEvent, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { withoutTrack, withTrack } from "../lib/tracks";
-import type { ImportedArchive, Playlist, SavedLibrary, Track, TrackId } from "../types";
+import type { ImportedArchive, Playlist, SavedLibrary, Track, TrackId, WatchedFolder } from "../types";
 
 type LibraryEvents = {
   onLoaded: (saved: SavedLibrary) => void;
   onLoadError: () => void;
+  /** Called when tracks arrive from a watched folder. */
+  onTracksAdded: (tracks: Track[]) => void;
 };
 
 function mergeTracks(current: Track[], added: Track[]) {
@@ -17,14 +20,35 @@ function mergeTracks(current: Track[], added: Track[]) {
  * Tracks, playlists, and favorites saved in the local SQLite library.
  * Each operation saves through the backend before updating local state and throws on failure.
  */
-export function useLibrary({ onLoaded, onLoadError }: LibraryEvents) {
+export function useLibrary({ onLoaded, onLoadError, onTracksAdded }: LibraryEvents) {
   const [tracks, setTracks] = useState<Track[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [favorites, setFavorites] = useState<TrackId[]>([]);
+  const [watchedFolders, setWatchedFolders] = useState<WatchedFolder[]>([]);
   const [loading, setLoading] = useState(true);
 
   const loaded = useEffectEvent(onLoaded);
   const failed = useEffectEvent(onLoadError);
+  const arrived = useEffectEvent(onTracksAdded);
+
+  useEffect(() => {
+    let cancelled = false;
+    invoke<WatchedFolder[]>("list_watched_folders")
+      .then((folders) => {
+        if (!cancelled) setWatchedFolders(folders);
+      })
+      .catch(() => {
+        // Watched folders keep working in the backend; the list is only for display.
+      });
+    const unlisten = listen<Track[]>("tracks-added", ({ payload }) => {
+      setTracks((current) => mergeTracks(current, payload));
+      arrived(payload);
+    });
+    return () => {
+      cancelled = true;
+      void unlisten.then((stop) => stop()).catch(() => {});
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -58,6 +82,17 @@ export function useLibrary({ onLoaded, onLoadError }: LibraryEvents) {
     const imported = await invoke<ImportedArchive>("import_archive", { path });
     setTracks((current) => mergeTracks(current, imported.tracks));
     return imported;
+  }
+
+  /** Watches a folder; files already in it are imported in the background. */
+  async function addWatchedFolder(path: string) {
+    const folder = await invoke<WatchedFolder>("add_watched_folder", { path });
+    setWatchedFolders((current) => current.some((item) => item.id === folder.id) ? current : [...current, folder]);
+  }
+
+  async function removeWatchedFolder(folderId: number) {
+    await invoke("remove_watched_folder", { folderId });
+    setWatchedFolders((current) => current.filter((item) => item.id !== folderId));
   }
 
   /** Removes a track from the library, its playlists, and Favorites. */
@@ -118,8 +153,11 @@ export function useLibrary({ onLoaded, onLoadError }: LibraryEvents) {
     tracks,
     playlists,
     favorites,
+    watchedFolders,
     loading,
     saveTracks,
+    addWatchedFolder,
+    removeWatchedFolder,
     importArchive,
     removeTrack,
     setRating,

@@ -6,6 +6,12 @@ export type TrackMetadata = {
   title: string | null;
   artist: string | null;
   album: string | null;
+  genre: string | null;
+  /** Often holds the prompt or style description for generated music. */
+  comment: string | null;
+  lyrics: string | null;
+  /** The music generator that made the file, when its tags say so. */
+  generator: { name: string; url: string | null } | null;
   durationSeconds: number;
 };
 

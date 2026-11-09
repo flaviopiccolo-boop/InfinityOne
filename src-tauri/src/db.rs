@@ -65,6 +65,17 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE tracks ADD COLUMN rating INTEGER CHECK (rating BETWEEN 1 AND 5);
     ALTER TABLE tracks ADD COLUMN play_count INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE tracks ADD COLUMN last_played_at INTEGER;",
+    // 4: folders imported automatically, and the files already handled in them
+    // so a track removed from the library is not imported again.
+    "CREATE TABLE watched_folders (
+        id INTEGER PRIMARY KEY,
+        path TEXT NOT NULL UNIQUE
+    );
+    CREATE TABLE seen_files (
+        path TEXT PRIMARY KEY,
+        size INTEGER NOT NULL,
+        modified INTEGER NOT NULL
+    );",
 ];
 
 pub(crate) fn open(path: &Path) -> rusqlite::Result<Connection> {
@@ -104,7 +115,7 @@ fn migrate(connection: &mut Connection) -> rusqlite::Result<()> {
     Ok(())
 }
 
-#[derive(serde::Serialize, Debug, PartialEq)]
+#[derive(serde::Serialize, Debug, PartialEq, Clone)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Track {
     pub(crate) id: i64,
@@ -229,6 +240,80 @@ pub(crate) fn record_play(
             },
         )
         .optional()
+}
+
+#[derive(serde::Serialize, Debug, PartialEq, Clone)]
+pub(crate) struct WatchedFolder {
+    pub(crate) id: i64,
+    pub(crate) path: String,
+}
+
+pub(crate) fn watched_folders(connection: &Connection) -> rusqlite::Result<Vec<WatchedFolder>> {
+    let mut query = connection.prepare("SELECT id, path FROM watched_folders ORDER BY id")?;
+    query
+        .query_map([], |row| {
+            Ok(WatchedFolder {
+                id: row.get(0)?,
+                path: row.get(1)?,
+            })
+        })?
+        .collect()
+}
+
+/// Adds a folder, or returns the existing one with the same path.
+pub(crate) fn add_watched_folder(
+    connection: &Connection,
+    path: &str,
+) -> rusqlite::Result<WatchedFolder> {
+    connection.execute(
+        "INSERT INTO watched_folders (path) VALUES (?1) ON CONFLICT(path) DO NOTHING",
+        [path],
+    )?;
+    connection.query_row(
+        "SELECT id, path FROM watched_folders WHERE path = ?1",
+        [path],
+        |row| {
+            Ok(WatchedFolder {
+                id: row.get(0)?,
+                path: row.get(1)?,
+            })
+        },
+    )
+}
+
+pub(crate) fn remove_watched_folder(connection: &Connection, id: i64) -> rusqlite::Result<bool> {
+    Ok(connection.execute("DELETE FROM watched_folders WHERE id = ?1", [id])? > 0)
+}
+
+/// Whether a file was already handled with this size and modification time.
+pub(crate) fn is_seen(
+    connection: &Connection,
+    path: &str,
+    size: i64,
+    modified: i64,
+) -> rusqlite::Result<bool> {
+    connection
+        .query_row(
+            "SELECT 1 FROM seen_files WHERE path = ?1 AND size = ?2 AND modified = ?3",
+            params![path, size, modified],
+            |_| Ok(()),
+        )
+        .optional()
+        .map(|row| row.is_some())
+}
+
+pub(crate) fn mark_seen(
+    connection: &Connection,
+    path: &str,
+    size: i64,
+    modified: i64,
+) -> rusqlite::Result<()> {
+    connection.execute(
+        "INSERT INTO seen_files (path, size, modified) VALUES (?1, ?2, ?3)
+         ON CONFLICT(path) DO UPDATE SET size = excluded.size, modified = excluded.modified",
+        params![path, size, modified],
+    )?;
+    Ok(())
 }
 
 #[derive(serde::Serialize, Debug, PartialEq)]
@@ -410,6 +495,33 @@ mod tests {
 
         assert!(set_rating(&connection, 1, None).unwrap());
         assert_eq!(tracks(&connection).unwrap()[0].rating, None);
+    }
+
+    #[test]
+    fn tracks_watched_folders_and_seen_files() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        migrate(&mut connection).unwrap();
+
+        let folder = add_watched_folder(&connection, "C:/Downloads/Suno").unwrap();
+        assert_eq!(
+            add_watched_folder(&connection, "C:/Downloads/Suno").unwrap(),
+            folder
+        );
+        assert_eq!(
+            watched_folders(&connection).unwrap(),
+            std::slice::from_ref(&folder)
+        );
+
+        assert!(!is_seen(&connection, "C:/a.mp3", 10, 100).unwrap());
+        mark_seen(&connection, "C:/a.mp3", 10, 100).unwrap();
+        assert!(is_seen(&connection, "C:/a.mp3", 10, 100).unwrap());
+        // A changed file is handled again.
+        assert!(!is_seen(&connection, "C:/a.mp3", 12, 100).unwrap());
+        mark_seen(&connection, "C:/a.mp3", 12, 100).unwrap();
+        assert!(is_seen(&connection, "C:/a.mp3", 12, 100).unwrap());
+
+        assert!(remove_watched_folder(&connection, folder.id).unwrap());
+        assert!(watched_folders(&connection).unwrap().is_empty());
     }
 
     #[test]

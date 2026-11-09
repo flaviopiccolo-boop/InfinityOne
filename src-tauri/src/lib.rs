@@ -1,5 +1,6 @@
 mod db;
 mod track_metadata;
+mod watch;
 mod zip_import;
 
 use std::{fs, path::Path, sync::Mutex};
@@ -198,19 +199,27 @@ async fn import_archive(app: AppHandle, path: String) -> Result<ImportedArchive,
         .map_err(error_text)?
 }
 
+fn is_zip_path(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("zip"))
+}
+
 fn import_archive_on_disk(app: &AppHandle, path: &str) -> Result<ImportedArchive, String> {
     let file = Path::new(path);
-    let scope = app.asset_protocol_scope();
     if !file.is_absolute()
-        || !file
-            .extension()
-            .is_some_and(|extension| extension.eq_ignore_ascii_case("zip"))
-        || !scope.is_allowed(file)
+        || !is_zip_path(file)
+        || !app.asset_protocol_scope().is_allowed(file)
         || !file.is_file()
     {
         return Err("Select a ZIP file available on disk.".into());
     }
+    import_zip(app, file)
+}
 
+/// Copies the audio in a ZIP to app storage and adds it to the library.
+/// The caller checks that `file` is a ZIP the app may read.
+fn import_zip(app: &AppHandle, file: &Path) -> Result<ImportedArchive, String> {
+    let scope = app.asset_protocol_scope();
     let media_directory = app
         .path()
         .app_local_data_dir()
@@ -282,6 +291,32 @@ fn save_tracks(
     Ok(tracks)
 }
 
+#[tauri::command]
+fn list_watched_folders(library: State<'_, Library>) -> Result<Vec<db::WatchedFolder>, String> {
+    db::watched_folders(&*library.lock()?).map_err(error_text)
+}
+
+/// Starts importing new MP3, WAV, and ZIP files from a folder, including the ones already there.
+#[tauri::command]
+fn add_watched_folder(app: AppHandle, path: String) -> Result<db::WatchedFolder, String> {
+    let folder = Path::new(&path);
+    if !folder.is_absolute() || !folder.is_dir() {
+        return Err("Select a folder available on disk.".into());
+    }
+    let added =
+        db::add_watched_folder(&*app.state::<Library>().lock()?, &path).map_err(error_text)?;
+    watch::start(&app)?;
+    watch::scan_in_background(&app, vec![added.clone()]);
+    Ok(added)
+}
+
+/// Stops watching a folder. Tracks already imported from it stay in the library.
+#[tauri::command]
+fn remove_watched_folder(app: AppHandle, folder_id: i64) -> Result<(), String> {
+    db::remove_watched_folder(&*app.state::<Library>().lock()?, folder_id).map_err(error_text)?;
+    watch::start(&app)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -290,7 +325,14 @@ pub fn run() {
             let directory = app.path().app_local_data_dir()?;
             fs::create_dir_all(&directory)?;
             let connection = db::open(&directory.join("library.sqlite3"))?;
+            let folders = db::watched_folders(&connection)?;
             app.manage(Library(Mutex::new(connection)));
+            app.manage(watch::Watcher::default());
+            let handle = app.handle();
+            if let Err(error) = watch::start(handle) {
+                eprintln!("Could not watch folders: {error}");
+            }
+            watch::scan_in_background(handle, folders);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -307,7 +349,10 @@ pub fn run() {
             rename_playlist,
             delete_playlist,
             add_playlist_track,
-            remove_playlist_track
+            remove_playlist_track,
+            list_watched_folders,
+            add_watched_folder,
+            remove_watched_folder
         ])
         .run(tauri::generate_context!())
         .expect("error while running Infinity One");

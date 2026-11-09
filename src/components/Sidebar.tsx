@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { smartPlaylists } from "../lib/smartPlaylists";
-import type { Playlist, View } from "../types";
+import type { Playlist, View, WatchedFolder } from "../types";
 
 /** The playlist being created ("new") or renamed (its id). */
 export type PlaylistEditor = { id: number | "new"; name: string };
@@ -12,6 +12,9 @@ type SidebarProps = {
   loading: boolean;
   busy: boolean;
   editor: PlaylistEditor | undefined;
+  watchedFolders: WatchedFolder[];
+  onAddFolder: () => void;
+  onRemoveFolder: (folder: WatchedFolder) => void;
   onNavigate: (view?: View) => void;
   onNewPlaylist: () => void;
   onSavePlaylist: (name: string) => void;
@@ -19,7 +22,7 @@ type SidebarProps = {
 };
 
 export default function Sidebar({
-  view, playlists, loading, busy, editor, onNavigate, onNewPlaylist, onSavePlaylist, onCancelEdit,
+  view, playlists, loading, busy, editor, watchedFolders, onAddFolder, onRemoveFolder, onNavigate, onNewPlaylist, onSavePlaylist, onCancelEdit,
 }: SidebarProps) {
   return (
     <aside className="sidebar">
@@ -58,9 +61,35 @@ export default function Sidebar({
           </button>
         ))}
       </nav>
+      <section className="watched" aria-labelledby="watched-heading">
+        <div className="nav-heading">
+          <span id="watched-heading">Watched folders</span>
+          <button className="icon-button" aria-label="Watch a folder" title="Import new MP3, WAV, and ZIP files from a folder automatically"
+            disabled={loading || busy} onClick={onAddFolder}>+</button>
+        </div>
+        {watchedFolders.length === 0 ? (
+          <p className="watched-empty">Watch your downloads folder to import new tracks automatically.</p>
+        ) : (
+          <ul>
+            {watchedFolders.map((folder) => (
+              <li key={folder.id} className="watched-folder" title={folder.path}>
+                <span aria-hidden="true">▣</span>
+                <span className="truncate">{folderName(folder.path)}</span>
+                <button type="button" className="watched-remove" disabled={busy}
+                  aria-label={`Stop watching ${folderName(folder.path)}`} title="Stop watching"
+                  onClick={() => onRemoveFolder(folder)}>×</button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
       <p className="local-note"><span aria-hidden="true" /> Local storage</p>
     </aside>
   );
+}
+
+function folderName(path: string) {
+  return path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || path;
 }
 
 type PlaylistFormProps = {
