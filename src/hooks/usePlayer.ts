@@ -1,0 +1,115 @@
+import { useEffect, useRef, useState } from "react";
+import { savePlaybackPosition } from "../lib/playbackPosition";
+import type { PlaybackPosition } from "../lib/playbackPosition";
+import type { View } from "../types";
+
+const stopped = { seconds: 0, duration: 0, playing: false };
+
+/** The active track, its `<audio>` element, playback progress, volume, and saved position. */
+export function usePlayer() {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const lastPosition = useRef<PlaybackPosition | undefined>(undefined);
+  const [active, setActive] = useState<string>();
+  const [resumeAt, setResumeAt] = useState<number>();
+  const [playback, setPlayback] = useState(stopped);
+  const [volume, setVolume] = useState(1);
+  const [muted, setMuted] = useState(false);
+  const [failedTrack, setFailedTrack] = useState<string>();
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (audio) {
+      audio.volume = volume;
+      audio.muted = muted;
+    }
+  }, [active, muted, volume]);
+
+  /** Loads a track and plays it from the start. */
+  function selectTrack(path: string) {
+    if (path === active) return;
+    setPlayback(stopped);
+    setFailedTrack(undefined);
+    setResumeAt(undefined);
+    setActive(path);
+  }
+
+  /** Loads a track paused at a saved position. */
+  function resume(path: string, seconds: number) {
+    setResumeAt(seconds);
+    setActive(path);
+  }
+
+  function savePosition(audio: HTMLAudioElement, source: View | undefined, force = false) {
+    if (!active || audio.readyState < 1 || audio.seeking) return;
+    const position = {
+      path: active,
+      seconds: audio.ended ? 0 : audio.currentTime,
+      source,
+    };
+    const previous = lastPosition.current;
+    if (!force && previous?.path === position.path && previous.source === position.source
+      && Math.floor(previous.seconds) === Math.floor(position.seconds)) return;
+
+    savePlaybackPosition(position);
+    lastPosition.current = position;
+  }
+
+  function syncPlayback(audio: HTMLAudioElement) {
+    const seconds = Math.round(audio.currentTime * 10) / 10;
+    const duration = Number.isFinite(audio.duration) ? audio.duration : 0;
+    const playing = !audio.paused && !audio.ended;
+    setPlayback((current) => current.seconds === seconds && current.duration === duration && current.playing === playing
+      ? current
+      : { seconds, duration, playing });
+  }
+
+  function restorePosition(audio: HTMLAudioElement, source: View | undefined) {
+    if (resumeAt && resumeAt < audio.duration) audio.currentTime = resumeAt;
+    else savePosition(audio, source, true);
+    syncPlayback(audio);
+  }
+
+  function seek(seconds: number) {
+    const audio = audioRef.current;
+    if (audio) {
+      audio.currentTime = seconds;
+      syncPlayback(audio);
+    }
+  }
+
+  /** Plays or pauses the loaded track. Returns false when no track is loaded. */
+  function togglePlayback() {
+    const audio = audioRef.current;
+    if (!audio) return false;
+    if (audio.paused) void audio.play().catch(() => setFailedTrack(active));
+    else audio.pause();
+    return true;
+  }
+
+  function changeVolume(value: number) {
+    setVolume(value);
+    setMuted(false);
+  }
+
+  return {
+    audioRef,
+    active,
+    resumeAt,
+    playback,
+    volume,
+    muted,
+    failed: active !== undefined && failedTrack === active,
+    selectTrack,
+    resume,
+    savePosition,
+    syncPlayback,
+    restorePosition,
+    seek,
+    togglePlayback,
+    changeVolume,
+    toggleMuted: () => setMuted(!muted),
+    markFailed: () => setFailedTrack(active),
+  };
+}
+
+export type Player = ReturnType<typeof usePlayer>;

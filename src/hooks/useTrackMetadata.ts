@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
-type TrackMetadata = {
+export type TrackMetadata = {
   title: string | null;
   artist: string | null;
   album: string | null;
