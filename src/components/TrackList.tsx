@@ -1,8 +1,8 @@
 import ActionMenu from "./ActionMenu";
 import { formatDuration } from "../hooks/useTrackMetadata";
 import type { TrackMetadata } from "../hooks/useTrackMetadata";
-import { trackName, trackTitle } from "../lib/tracks";
-import type { Playlist, View } from "../types";
+import { trackFormat, trackName, trackTitle } from "../lib/tracks";
+import type { Playlist, Track, TrackId, View } from "../types";
 
 type TrackListProps = {
   view: View | undefined;
@@ -10,30 +10,31 @@ type TrackListProps = {
   playlist: Playlist | undefined;
   playlists: Playlist[];
   /** Tracks in the open collection, before search. */
-  tracks: string[];
+  tracks: Track[];
   /** Library tracks that can be added to the open playlist. */
-  availableTracks: string[];
+  availableTracks: Track[];
   search: string;
-  active: string | undefined;
-  metadata: Record<string, TrackMetadata>;
-  favorites: Set<string>;
+  active: TrackId | undefined;
+  metadata: Record<TrackId, TrackMetadata>;
+  favorites: Set<TrackId>;
   loading: boolean;
   busy: boolean;
-  onPlay: (path: string) => void;
-  onToggleFavorite: (path: string) => void;
-  onSchedule: (path: string, placement: "next" | "end") => void;
-  onSetPlaylistTrack: (playlist: Playlist, path: string, included: boolean) => void;
+  onPlay: (track: TrackId) => void;
+  onToggleFavorite: (track: TrackId) => void;
+  onSchedule: (track: TrackId, placement: "next" | "end") => void;
+  onSetPlaylistTrack: (playlist: Playlist, track: TrackId, included: boolean) => void;
+  onRemove: (track: Track) => void;
 };
 
 export default function TrackList({
   view, playlist, playlists, tracks, availableTracks, search, active, metadata, favorites, loading, busy,
-  onPlay, onToggleFavorite, onSchedule, onSetPlaylistTrack,
+  onPlay, onToggleFavorite, onSchedule, onSetPlaylistTrack, onRemove,
 }: TrackListProps) {
-  const title = (path: string) => trackTitle(path, metadata[path]);
+  const title = (track: Track) => trackTitle(track, metadata[track.id]);
   const query = search.trim().toLocaleLowerCase();
   const matches = tracks
-    .map((path, index) => ({ path, position: index + 1 }))
-    .filter(({ path }) => [trackName(path), metadata[path]?.title, metadata[path]?.artist, metadata[path]?.album]
+    .map((track, index) => ({ track, position: index + 1 }))
+    .filter(({ track }) => [trackName(track), metadata[track.id]?.title, metadata[track.id]?.artist, metadata[track.id]?.album]
       .some((value) => value?.toLocaleLowerCase().includes(query)));
   const displayedCount = query ? matches.length : tracks.length;
 
@@ -48,11 +49,11 @@ export default function TrackList({
           <ActionMenu label="Add tracks to playlist" icon="add" disabled={busy}
             groups={[{
               label: "Add tracks",
-              actions: availableTracks.map((path) => ({
-                id: path,
+              actions: availableTracks.map((track) => ({
+                id: String(track.id),
                 icon: "track",
-                label: title(path),
-                onSelect: () => onSetPlaylistTrack(playlist, path, true),
+                label: title(track),
+                onSelect: () => onSetPlaylistTrack(playlist, track.id, true),
               })),
             }]} />
         )}
@@ -69,40 +70,46 @@ export default function TrackList({
         <p className="empty" role="status">No tracks match your search.</p>
       ) : (
         <ol className="tracks">
-          {matches.map(({ path, position }) => {
-            const tags = metadata[path];
-            const details = [tags?.artist, tags?.album].filter(Boolean).join(" · ");
-            const favorite = favorites.has(path);
+          {matches.map(({ track, position }) => {
+            const { id } = track;
+            const tags = metadata[id];
+            const details = track.missing
+              ? "File not found"
+              : [tags?.artist, tags?.album].filter(Boolean).join(" · ");
+            const favorite = favorites.has(id);
             return (
-              <li className="track-row" key={path}>
-                <button className="track" aria-current={path === active ? "true" : undefined}
-                  title={path} onClick={() => onPlay(path)}>
-                  <span className="track-index" aria-hidden="true">{path === active ? "♪" : position}</span>
+              <li className="track-row" key={id} data-missing={track.missing || undefined}>
+                <button className="track" aria-current={id === active ? "true" : undefined}
+                  title={track.location} onClick={() => onPlay(id)}>
+                  <span className="track-index" aria-hidden="true">{id === active ? "♪" : position}</span>
                   <span className="track-text">
-                    <span className="truncate">{title(path)}</span>
+                    <span className="truncate">{title(track)}</span>
                     {details && <span className="track-caption truncate">{details}</span>}
                   </span>
                   <span className="format">
-                    {path.split(".").pop()?.toUpperCase()}
+                    {trackFormat(track)}
                     {tags && tags.durationSeconds > 0 ? ` · ${formatDuration(tags.durationSeconds)}` : ""}
                   </span>
                 </button>
                 <button className="favorite-button" type="button" disabled={busy}
-                  aria-label={`Favorite ${trackName(path)}`} aria-pressed={favorite}
+                  aria-label={`Favorite ${trackName(track)}`} aria-pressed={favorite}
                   title={favorite ? "Remove from favorites" : "Add to favorites"}
-                  onClick={() => onToggleFavorite(path)}>
+                  onClick={() => onToggleFavorite(id)}>
                   <span aria-hidden="true">{favorite ? "♥" : "♡"}</span>
                 </button>
-                <ActionMenu label={`More actions for ${title(path)}`} icon="more" groups={[
+                <ActionMenu label={`More actions for ${title(track)}`} icon="more" groups={[
                   { actions: [
-                    { id: "next", icon: "next", label: "Play next", disabled: path === active,
-                      onSelect: () => onSchedule(path, "next") },
-                    { id: "queue", icon: "queue", label: "Add to queue", disabled: path === active,
-                      onSelect: () => onSchedule(path, "end") },
-                    ...(playlist ? [{
+                    { id: "next", icon: "next", label: "Play next", disabled: id === active,
+                      onSelect: () => onSchedule(id, "next") },
+                    { id: "queue", icon: "queue", label: "Add to queue", disabled: id === active,
+                      onSelect: () => onSchedule(id, "end") },
+                    playlist ? {
                       id: "remove", icon: "remove" as const, label: "Remove from playlist", disabled: busy,
-                      onSelect: () => onSetPlaylistTrack(playlist, path, false),
-                    }] : []),
+                      onSelect: () => onSetPlaylistTrack(playlist, id, false),
+                    } : {
+                      id: "remove", icon: "delete" as const, label: "Remove from library", disabled: busy,
+                      onSelect: () => onRemove(track),
+                    },
                   ] },
                   ...(!playlist && playlists.length ? [{
                     label: "Add to playlist",
@@ -110,8 +117,8 @@ export default function TrackList({
                       id: String(item.id),
                       icon: "playlist" as const,
                       label: item.name,
-                      disabled: busy || item.tracks.includes(path),
-                      onSelect: () => onSetPlaylistTrack(item, path, true),
+                      disabled: busy || item.tracks.includes(id),
+                      onSelect: () => onSetPlaylistTrack(item, id, true),
                     })),
                   }] : []),
                 ]} />

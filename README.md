@@ -26,6 +26,8 @@ Run `npm run build` to build the frontend or `npm run tauri build` to package th
 
 Use **Search tracks** to filter the current library or playlist. Open the track’s **More actions** menu to add it to a playlist. Open a playlist to rename it or remove tracks from it. Removing a track from a playlist keeps it in your library.
 
+To remove a track from the library, open its **More actions** menu and choose **Remove from library**. This also removes it from your playlists and Favorites, but the audio file stays on disk. Open a playlist and choose **Delete playlist** to delete it; its tracks stay in your library. Tracks whose file was moved or deleted are dimmed and marked **File not found**.
+
 ## Import a ZIP archive
 
 Choose **Import ZIP** to add MP3 and WAV tracks from an archive, including a batch download from Google Flow Music. Infinity One copies the audio to its local app storage, so the original ZIP can be moved after import. Importing the same ZIP again skips existing tracks. The maximum is 2 GiB per archive or batch of extracted audio and 512 MiB per track.
@@ -53,3 +55,7 @@ Infinity One also exposes play, pause, previous track, and next track through Me
 ## Track metadata and artwork
 
 Infinity One reads embedded title, artist, and album tags and shows the duration of MP3 and WAV files when available. Search matches these text tags and the original filename. The player shows the current track’s embedded JPEG or PNG artwork up to 2 MiB. Files without tags still appear by filename.
+
+## Library database
+
+The library is stored in `library.sqlite3` in the app's local data folder. Each track has a `source` (currently always `local`) and a `location` (the file path for local tracks), so other sources can be added later. Schema changes are numbered migrations in `src-tauri/src/db.rs`, tracked with `PRAGMA user_version` and applied when the app starts. Add a new migration for every schema change and never edit one that has shipped. Run `cargo test` in `src-tauri` to check the migrations.

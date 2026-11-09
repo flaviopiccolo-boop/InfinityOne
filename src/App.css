@@ -443,3 +443,7 @@ input { background: var(--background); color: var(--text); border: 1px solid var
 }
 .action-option svg { color: var(--accent); }
 .action-option:hover:not(:disabled), .action-option:focus-visible { background: var(--surface); }
+
+.track-row[data-missing] .track {
+  opacity: 0.55;
+}

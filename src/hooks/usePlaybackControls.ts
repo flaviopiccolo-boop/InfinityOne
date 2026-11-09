@@ -1,5 +1,6 @@
 import { useEffect, useEffectEvent } from "react";
 import type { RefObject } from "react";
+import type { TrackId } from "../types";
 
 function play(audio: HTMLAudioElement) {
   void audio.play().catch(() => {
@@ -9,13 +10,13 @@ function play(audio: HTMLAudioElement) {
 
 export function usePlaybackControls(
   audioRef: RefObject<HTMLAudioElement | null>,
-  activeTrack: string | undefined,
+  activeTrack: TrackId | undefined,
   title: string | undefined,
-  previousTrack: string | undefined,
-  nextTrack: string | undefined,
-  selectTrack: (path: string) => void,
+  previousTrack: TrackId | undefined,
+  nextTrack: TrackId | undefined,
+  selectTrack: (track: TrackId) => void,
 ) {
-  const skipTo = useEffectEvent((path: string) => selectTrack(path));
+  const skipTo = useEffectEvent((track: TrackId) => selectTrack(track));
 
   useEffect(() => {
     const audio = audioRef.current;

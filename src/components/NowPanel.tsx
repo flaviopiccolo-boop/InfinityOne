@@ -1,17 +1,19 @@
+import type { TrackId } from "../types";
+
 type NowPanelProps = {
-  active: string | undefined;
+  active: TrackId | undefined;
   title: string | undefined;
   artist: string | null | undefined;
   cover: string | undefined;
   onCoverError: () => void;
   favorite: boolean;
   busy: boolean;
-  onToggleFavorite: (path: string) => void;
+  onToggleFavorite: (track: TrackId) => void;
   /** The first upcoming tracks with their display titles. */
-  upcoming: { path: string; title: string }[];
+  upcoming: { id: TrackId; title: string }[];
   queueOpen: boolean;
   onToggleQueue: () => void;
-  onSelect: (path: string) => void;
+  onSelect: (track: TrackId) => void;
 };
 
 export default function NowPanel({
@@ -46,8 +48,8 @@ export default function NowPanel({
           {upcoming.length ? (
             <ol className="next-preview">
               {upcoming.map((track) => (
-                <li key={track.path}>
-                  <button type="button" onClick={() => onSelect(track.path)}>
+                <li key={track.id}>
+                  <button type="button" onClick={() => onSelect(track.id)}>
                     <span className="preview-art" aria-hidden="true">♫</span>
                     <span className="truncate">{track.title}</span>
                   </button>

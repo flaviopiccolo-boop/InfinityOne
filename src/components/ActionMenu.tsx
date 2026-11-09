@@ -8,6 +8,7 @@ const icons = {
   playlist: <path d="M4 6h16M4 12h10M4 18h6m8-6v8m-4-4h8"/>,
   track: <path d="M10 17V6l9-2v11M10 17c0 1-1 2-3 2s-3-1-3-2 1-2 3-2 3 1 3 2zm9-2c0 1-1 2-3 2s-3-1-3-2 1-2 3-2 3 1 3 2z"/>,
   remove: <path d="M5 12h14"/>,
+  delete: <path d="M4 7h16M10 11v6m4-6v6M6 7l1 13h10l1-13M9 7V4h6v3"/>,
 };
 
 type MenuAction = {

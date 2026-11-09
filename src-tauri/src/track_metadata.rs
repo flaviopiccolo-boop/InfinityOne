@@ -1,4 +1,7 @@
-use std::{collections::HashMap, path::Path};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
 
 use base64::{Engine, engine::general_purpose::STANDARD};
 use lofty::{
@@ -38,65 +41,75 @@ fn read_metadata(path: &Path) -> Option<TrackMetadata> {
     })
 }
 
+/// The file behind each local track that can be read, keyed by track id.
+fn readable_paths(app: &AppHandle, track_ids: &[i64]) -> Result<Vec<(i64, PathBuf)>, String> {
+    let library = app.state::<crate::Library>();
+    let connection = library.lock()?;
+    let scope = app.asset_protocol_scope();
+    let mut paths = Vec::with_capacity(track_ids.len());
+    for &id in track_ids {
+        let path =
+            crate::db::local_track_path(&connection, id).map_err(|error| error.to_string())?;
+        if let Some(path) = path
+            .filter(|path| crate::is_audio_path(path) && scope.is_allowed(path) && path.is_file())
+        {
+            paths.push((id, path));
+        }
+    }
+    Ok(paths)
+}
+
 #[tauri::command]
 pub(crate) async fn read_track_metadata(
     app: AppHandle,
-    paths: Vec<String>,
-) -> Result<HashMap<String, TrackMetadata>, String> {
+    track_ids: Vec<i64>,
+) -> Result<HashMap<i64, TrackMetadata>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let scope = app.asset_protocol_scope();
-        paths
+        Ok(readable_paths(&app, &track_ids)?
             .into_iter()
-            .filter_map(|path| {
-                let file = Path::new(&path);
-                if !crate::is_audio_path(file) || !scope.is_allowed(file) || !file.is_file() {
-                    return None;
-                }
-                let metadata = read_metadata(file)?;
-                Some((path, metadata))
-            })
-            .collect()
+            .filter_map(|(id, path)| Some((id, read_metadata(&path)?)))
+            .collect())
     })
     .await
-    .map_err(|error| error.to_string())
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
 pub(crate) async fn read_track_artwork(
     app: AppHandle,
-    path: String,
+    track_id: i64,
 ) -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let file = Path::new(&path);
-        if !crate::is_audio_path(file)
-            || !app.asset_protocol_scope().is_allowed(file)
-            || !file.is_file()
-        {
-            return None;
-        }
-        let options = ParseOptions::new().read_properties(false);
-        let tagged = Probe::open(file).ok()?.options(options).read().ok()?;
-        let (picture, mime) = tagged
-            .tags()
-            .iter()
-            .flat_map(|tag| tag.pictures())
-            .filter_map(|picture| {
-                if picture.data().is_empty() || picture.data().len() > MAX_ARTWORK_BYTES {
-                    return None;
-                }
-                let mime = match picture.mime_type()? {
-                    MimeType::Jpeg => "image/jpeg",
-                    MimeType::Png => "image/png",
-                    _ => return None,
-                };
-                Some((picture, mime))
-            })
-            .min_by_key(|(picture, _)| picture.pic_type() != PictureType::CoverFront)?;
-        Some(format!(
-            "data:{mime};base64,{}",
-            STANDARD.encode(picture.data())
-        ))
+        let Some((_, file)) = readable_paths(&app, &[track_id])?.pop() else {
+            return Ok(None);
+        };
+        Ok(read_artwork(&file))
     })
     .await
-    .map_err(|error| error.to_string())
+    .map_err(|error| error.to_string())?
+}
+
+fn read_artwork(file: &Path) -> Option<String> {
+    let options = ParseOptions::new().read_properties(false);
+    let tagged = Probe::open(file).ok()?.options(options).read().ok()?;
+    let (picture, mime) = tagged
+        .tags()
+        .iter()
+        .flat_map(|tag| tag.pictures())
+        .filter_map(|picture| {
+            if picture.data().is_empty() || picture.data().len() > MAX_ARTWORK_BYTES {
+                return None;
+            }
+            let mime = match picture.mime_type()? {
+                MimeType::Jpeg => "image/jpeg",
+                MimeType::Png => "image/png",
+                _ => return None,
+            };
+            Some((picture, mime))
+        })
+        .min_by_key(|(picture, _)| picture.pic_type() != PictureType::CoverFront)?;
+    Some(format!(
+        "data:{mime};base64,{}",
+        STANDARD.encode(picture.data())
+    ))
 }

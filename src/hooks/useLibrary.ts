@@ -1,21 +1,26 @@
 import { useEffect, useEffectEvent, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { withoutTrack, withTrack } from "../lib/tracks";
-import type { ImportedArchive, Playlist, SavedLibrary } from "../types";
+import type { ImportedArchive, Playlist, SavedLibrary, Track, TrackId } from "../types";
 
 type LibraryEvents = {
   onLoaded: (saved: SavedLibrary) => void;
   onLoadError: () => void;
 };
 
+function mergeTracks(current: Track[], added: Track[]) {
+  const known = new Set(current.map((track) => track.id));
+  return [...current, ...added.filter((track) => !known.has(track.id))];
+}
+
 /**
  * Tracks, playlists, and favorites saved in the local SQLite library.
  * Each operation saves through the backend before updating local state and throws on failure.
  */
 export function useLibrary({ onLoaded, onLoadError }: LibraryEvents) {
-  const [tracks, setTracks] = useState<string[]>([]);
+  const [tracks, setTracks] = useState<Track[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
-  const [favorites, setFavorites] = useState<string[]>([]);
+  const [favorites, setFavorites] = useState<TrackId[]>([]);
   const [loading, setLoading] = useState(true);
 
   const loaded = useEffectEvent(onLoaded);
@@ -42,15 +47,25 @@ export function useLibrary({ onLoaded, onLoadError }: LibraryEvents) {
     };
   }, []);
 
+  /** Adds local files and returns their tracks, including ones already in the library. */
   async function saveTracks(paths: string[]) {
-    await invoke("save_tracks", { paths });
-    setTracks((current) => [...new Set([...current, ...paths])]);
+    const saved = await invoke<Track[]>("save_tracks", { paths });
+    setTracks((current) => mergeTracks(current, saved));
+    return saved;
   }
 
   async function importArchive(path: string) {
     const imported = await invoke<ImportedArchive>("import_archive", { path });
-    setTracks((current) => [...new Set([...current, ...imported.paths])]);
+    setTracks((current) => mergeTracks(current, imported.tracks));
     return imported;
+  }
+
+  /** Removes a track from the library, its playlists, and Favorites. */
+  async function removeTrack(trackId: TrackId) {
+    await invoke("remove_track", { trackId });
+    setTracks((current) => current.filter((track) => track.id !== trackId));
+    setFavorites((current) => withoutTrack(current, trackId));
+    setPlaylists((current) => current.map((item) => ({ ...item, tracks: withoutTrack(item.tracks, trackId) })));
   }
 
   async function createPlaylist(name: string) {
@@ -66,17 +81,22 @@ export function useLibrary({ onLoaded, onLoadError }: LibraryEvents) {
     ));
   }
 
-  async function setPlaylistTrack(playlistId: number, path: string, included: boolean) {
-    await invoke(included ? "add_playlist_track" : "remove_playlist_track", { playlistId, path });
+  async function deletePlaylist(playlistId: number) {
+    await invoke("delete_playlist", { playlistId });
+    setPlaylists((current) => current.filter((item) => item.id !== playlistId));
+  }
+
+  async function setPlaylistTrack(playlistId: number, trackId: TrackId, included: boolean) {
+    await invoke(included ? "add_playlist_track" : "remove_playlist_track", { playlistId, trackId });
     setPlaylists((current) => current.map((item) => item.id === playlistId
-      ? { ...item, tracks: included ? withTrack(item.tracks, path) : withoutTrack(item.tracks, path) }
+      ? { ...item, tracks: included ? withTrack(item.tracks, trackId) : withoutTrack(item.tracks, trackId) }
       : item,
     ));
   }
 
-  async function setFavorite(path: string, favorite: boolean) {
-    await invoke("set_favorite", { path, favorite });
-    setFavorites((current) => favorite ? withTrack(current, path) : withoutTrack(current, path));
+  async function setFavorite(trackId: TrackId, favorite: boolean) {
+    await invoke("set_favorite", { trackId, favorite });
+    setFavorites((current) => favorite ? withTrack(current, trackId) : withoutTrack(current, trackId));
   }
 
   return {
@@ -86,8 +106,10 @@ export function useLibrary({ onLoaded, onLoadError }: LibraryEvents) {
     loading,
     saveTracks,
     importArchive,
+    removeTrack,
     createPlaylist,
     renamePlaylist,
+    deletePlaylist,
     setPlaylistTrack,
     setFavorite,
   };

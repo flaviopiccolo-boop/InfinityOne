@@ -1,22 +1,22 @@
 import { useState } from "react";
 import { shuffleTracks } from "../lib/tracks";
-import type { Queue, RepeatMode, View } from "../types";
+import type { Queue, RepeatMode, TrackId, View } from "../types";
 
 /**
  * Manual changes to the queue on top of the collection order:
  * `tracks` is the explicit order, `priority` holds "Play next" tracks,
  * `tail` holds "Add to queue" tracks, and `excluded` holds removed tracks.
  */
-type QueueOrder = { tracks: string[]; priority: string[]; tail: string[]; excluded: string[] };
+type QueueOrder = { tracks: TrackId[]; priority: TrackId[]; tail: TrackId[]; excluded: TrackId[] };
 
 const emptyQueueOrder: QueueOrder = { tracks: [], priority: [], tail: [], excluded: [] };
 const nextRepeatMode: Record<RepeatMode, RepeatMode> = { off: "all", all: "one", one: "off" };
 
 type QueueOptions = {
   /** Library tracks, used as the queue when no playlist or Favorites is the source. */
-  tracks: string[];
-  active: string | undefined;
-  selectTrack: (path: string) => void;
+  tracks: TrackId[];
+  active: TrackId | undefined;
+  selectTrack: (id: TrackId) => void;
 };
 
 /** The playback queue: its source collection, manual order, shuffle, and repeat. */
@@ -29,10 +29,10 @@ export function useQueue({ tracks, active, selectTrack }: QueueOptions) {
   const collectionTracks = queue?.tracks ?? tracks;
   const queueOrder = order ?? emptyQueueOrder;
   const eligibleTracks = new Set([...collectionTracks, ...queueOrder.priority, ...queueOrder.tail]);
-  for (const path of queueOrder.excluded) eligibleTracks.delete(path);
+  for (const id of queueOrder.excluded) eligibleTracks.delete(id);
   if (active) eligibleTracks.add(active);
   const queuedTracks = [...new Set([...queueOrder.tracks, ...collectionTracks])]
-    .filter((path) => eligibleTracks.has(path));
+    .filter((id) => eligibleTracks.has(id));
   const activeIndex = active ? queuedTracks.indexOf(active) : -1;
   const previousTrack = activeIndex > 0 ? queuedTracks[activeIndex - 1] : undefined;
   const upcomingTracks = activeIndex >= 0 ? queuedTracks.slice(activeIndex + 1) : [];
@@ -40,18 +40,18 @@ export function useQueue({ tracks, active, selectTrack }: QueueOptions) {
   const loop = repeat === "one" || (repeat === "all" && queuedTracks.length === 1);
 
   /** Starts a new queue from `source`, or from the library when there is no source. */
-  function startTrack(path: string, source?: Queue, libraryTracks = tracks) {
-    if (path === active && source?.id === queue?.id) return;
-    const paths = source?.tracks ?? libraryTracks;
+  function startTrack(id: TrackId, source?: Queue, libraryTracks = tracks) {
+    if (id === active && source?.id === queue?.id) return;
+    const ids = source?.tracks ?? libraryTracks;
     setQueue(source);
     setOrder(shuffle
-      ? { ...emptyQueueOrder, tracks: [path, ...shuffleTracks(paths.filter((track) => track !== path))] }
+      ? { ...emptyQueueOrder, tracks: [id, ...shuffleTracks(ids.filter((track) => track !== id))] }
       : undefined);
-    selectTrack(path);
+    selectTrack(id);
   }
 
   /** Updates the source collection's tracks when `id` is the current queue source. */
-  function updateSource(id: View, update: (paths: string[]) => string[]) {
+  function updateSource(id: View, update: (ids: TrackId[]) => TrackId[]) {
     setQueue((current) => current?.id === id ? { ...current, tracks: update(current.tracks) } : current);
   }
 
@@ -60,12 +60,12 @@ export function useQueue({ tracks, active, selectTrack }: QueueOptions) {
     if (activeIndex < 0) return;
     const priority = new Set(queueOrder.priority);
     const tail = new Set(queueOrder.tail);
-    const pinned = upcomingTracks.filter((path) => priority.has(path));
-    const appended = upcomingTracks.filter((path) => tail.has(path));
-    const ordinary = upcomingTracks.filter((path) => !priority.has(path) && !tail.has(path));
+    const pinned = upcomingTracks.filter((id) => priority.has(id));
+    const appended = upcomingTracks.filter((id) => tail.has(id));
+    const ordinary = upcomingTracks.filter((id) => !priority.has(id) && !tail.has(id));
     const remaining = new Set(ordinary);
     const ordered = shuffle
-      ? collectionTracks.filter((path) => remaining.has(path))
+      ? collectionTracks.filter((id) => remaining.has(id))
       : shuffleTracks(ordinary);
     setOrder({
       ...queueOrder,
@@ -74,29 +74,29 @@ export function useQueue({ tracks, active, selectTrack }: QueueOptions) {
   }
 
   /**
-   * Plays `path` next or at the end of the queue. Without an active track it starts
+   * Plays `id` next or at the end of the queue. Without an active track it starts
    * playback from `source` instead. Returns true when the track was added to the queue.
    */
-  function scheduleTrack(path: string, placement: "next" | "end", source?: Queue) {
+  function scheduleTrack(id: TrackId, placement: "next" | "end", source?: Queue) {
     if (!active) {
-      startTrack(path, source);
+      startTrack(id, source);
       return false;
     }
-    if (path === active) return false;
+    if (id === active) return false;
 
-    const remaining = queuedTracks.filter((track) => track !== path);
+    const remaining = queuedTracks.filter((track) => track !== id);
     const insertAt = placement === "next" ? remaining.indexOf(active) + 1 : remaining.length;
-    remaining.splice(insertAt, 0, path);
-    const priority = queueOrder.priority.filter((track) => track !== path);
-    const tail = queueOrder.tail.filter((track) => track !== path);
-    if (placement === "next") priority.unshift(path);
-    else tail.push(path);
+    remaining.splice(insertAt, 0, id);
+    const priority = queueOrder.priority.filter((track) => track !== id);
+    const tail = queueOrder.tail.filter((track) => track !== id);
+    if (placement === "next") priority.unshift(id);
+    else tail.push(id);
 
     setOrder({
       tracks: remaining,
       priority,
       tail,
-      excluded: queueOrder.excluded.filter((track) => track !== path),
+      excluded: queueOrder.excluded.filter((track) => track !== id),
     });
     return true;
   }
@@ -111,12 +111,24 @@ export function useQueue({ tracks, active, selectTrack }: QueueOptions) {
     setOrder({ ...queueOrder, tracks: reordered });
   }
 
-  function removeUpcoming(path: string) {
+  function removeUpcoming(id: TrackId) {
     setOrder({
-      tracks: queuedTracks.filter((track) => track !== path),
-      priority: queueOrder.priority.filter((track) => track !== path),
-      tail: queueOrder.tail.filter((track) => track !== path),
-      excluded: [...queueOrder.excluded, path],
+      tracks: queuedTracks.filter((track) => track !== id),
+      priority: queueOrder.priority.filter((track) => track !== id),
+      tail: queueOrder.tail.filter((track) => track !== id),
+      excluded: [...queueOrder.excluded, id],
+    });
+  }
+
+  /** Drops a track that left the library from the queue and its source collection. */
+  function forget(id: TrackId) {
+    const keep = (track: TrackId) => track !== id;
+    setQueue((current) => current && { ...current, tracks: current.tracks.filter(keep) });
+    setOrder((current) => current && {
+      tracks: current.tracks.filter(keep),
+      priority: current.priority.filter(keep),
+      tail: current.tail.filter(keep),
+      excluded: current.excluded.filter(keep),
     });
   }
 
@@ -140,6 +152,7 @@ export function useQueue({ tracks, active, selectTrack }: QueueOptions) {
     scheduleTrack,
     moveUpcoming,
     removeUpcoming,
+    forget,
     playNext,
   };
 }

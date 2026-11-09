@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { savePlaybackPosition } from "../lib/playbackPosition";
 import type { PlaybackPosition } from "../lib/playbackPosition";
-import type { View } from "../types";
+import type { TrackId, View } from "../types";
 
 const stopped = { seconds: 0, duration: 0, playing: false };
 
@@ -9,12 +9,12 @@ const stopped = { seconds: 0, duration: 0, playing: false };
 export function usePlayer() {
   const audioRef = useRef<HTMLAudioElement>(null);
   const lastPosition = useRef<PlaybackPosition | undefined>(undefined);
-  const [active, setActive] = useState<string>();
+  const [active, setActive] = useState<TrackId>();
   const [resumeAt, setResumeAt] = useState<number>();
   const [playback, setPlayback] = useState(stopped);
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
-  const [failedTrack, setFailedTrack] = useState<string>();
+  const [failedTrack, setFailedTrack] = useState<TrackId>();
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -25,29 +25,37 @@ export function usePlayer() {
   }, [active, muted, volume]);
 
   /** Loads a track and plays it from the start. */
-  function selectTrack(path: string) {
-    if (path === active) return;
+  function selectTrack(track: TrackId) {
+    if (track === active) return;
     setPlayback(stopped);
     setFailedTrack(undefined);
     setResumeAt(undefined);
-    setActive(path);
+    setActive(track);
   }
 
   /** Loads a track paused at a saved position. */
-  function resume(path: string, seconds: number) {
+  function resume(track: TrackId, seconds: number) {
     setResumeAt(seconds);
-    setActive(path);
+    setActive(track);
+  }
+
+  /** Unloads the active track. */
+  function stop() {
+    setPlayback(stopped);
+    setFailedTrack(undefined);
+    setResumeAt(undefined);
+    setActive(undefined);
   }
 
   function savePosition(audio: HTMLAudioElement, source: View | undefined, force = false) {
     if (!active || audio.readyState < 1 || audio.seeking) return;
     const position = {
-      path: active,
+      track: active,
       seconds: audio.ended ? 0 : audio.currentTime,
       source,
     };
     const previous = lastPosition.current;
-    if (!force && previous?.path === position.path && previous.source === position.source
+    if (!force && previous?.track === position.track && previous.source === position.source
       && Math.floor(previous.seconds) === Math.floor(position.seconds)) return;
 
     savePlaybackPosition(position);
@@ -101,6 +109,7 @@ export function usePlayer() {
     failed: active !== undefined && failedTrack === active,
     selectTrack,
     resume,
+    stop,
     savePosition,
     syncPlayback,
     restorePosition,

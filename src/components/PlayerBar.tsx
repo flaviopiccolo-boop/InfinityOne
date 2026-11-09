@@ -4,11 +4,15 @@ import QueuePanel from "./QueuePanel";
 import { formatDuration } from "../hooks/useTrackMetadata";
 import type { Player } from "../hooks/usePlayer";
 import type { PlaybackQueue } from "../hooks/useQueue";
+import type { Track, TrackId } from "../types";
 
 type PlayerBarProps = {
   player: Player;
   queue: PlaybackQueue;
-  title: (path: string) => string;
+  /** The loaded track. */
+  track: Track | undefined;
+  title: (track: TrackId) => string;
+  name: (track: TrackId) => string;
   artist: string | null | undefined;
   cover: string | undefined;
   onCoverError: () => void;
@@ -24,7 +28,7 @@ function rangeProgress(percent: number) {
 }
 
 export default function PlayerBar({
-  player, queue, title, artist, cover, onCoverError, canStart, onTogglePlayback, queueOpen, onToggleQueue,
+  player, queue, track, title, name, artist, cover, onCoverError, canStart, onTogglePlayback, queueOpen, onToggleQueue,
 }: PlayerBarProps) {
   const { active, playback, volume, muted } = player;
   const { previousTrack, nextTrack, shuffle, repeat } = queue;
@@ -38,7 +42,7 @@ export default function PlayerBar({
         </div>
         <div className="track-details">
           <div className="eyebrow">Now playing</div>
-          <p className="truncate" title={active}>{active ? title(active) : "No track selected"}</p>
+          <p className="truncate" title={track?.location}>{active ? title(active) : "No track selected"}</p>
           {artist && <div className="track-caption truncate">{artist}</div>}
         </div>
       </div>
@@ -83,8 +87,8 @@ export default function PlayerBar({
             onChange={(event) => player.seek(event.target.valueAsNumber)} />
           <span>{formatDuration(playback.duration)}</span>
         </div>
-        {active && (
-          <audio key={active} ref={player.audioRef} src={convertFileSrc(active)} hidden
+        {track && (
+          <audio key={track.id} ref={player.audioRef} src={convertFileSrc(track.location)} hidden
             autoPlay={player.resumeAt === undefined} loop={queue.loop}
             onLoadedMetadata={(event) => player.restorePosition(event.currentTarget, source)}
             onDurationChange={(event) => player.syncPlayback(event.currentTarget)}
@@ -130,7 +134,7 @@ export default function PlayerBar({
           </svg>
         </button>
       </div>
-      <QueuePanel open={queueOpen} active={active} queue={queue} title={title} onSelect={player.selectTrack} />
+      <QueuePanel open={queueOpen} active={active} queue={queue} title={title} name={name} onSelect={player.selectTrack} />
       {player.failed && <p className="error" role="alert">Check that the file is still in its original folder.</p>}
     </footer>
   );
