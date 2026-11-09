@@ -1,60 +1,31 @@
+mod db;
 mod track_metadata;
+mod watch;
 mod zip_import;
 
 use std::{fs, path::Path, sync::Mutex};
 
+use db::{Playlist, Track};
 use rusqlite::Connection;
 use tauri::{AppHandle, Manager, State};
 
 struct Library(Mutex<Connection>);
 
-fn track_paths(connection: &Connection) -> rusqlite::Result<Vec<String>> {
-    let mut query = connection.prepare("SELECT path FROM tracks ORDER BY id")?;
-    query.query_map([], |row| row.get(0))?.collect()
+fn error_text(error: impl ToString) -> String {
+    error.to_string()
 }
 
-#[derive(serde::Serialize)]
-struct Playlist {
-    id: i64,
-    name: String,
-    tracks: Vec<String>,
+impl Library {
+    fn lock(&self) -> Result<std::sync::MutexGuard<'_, Connection>, String> {
+        self.0.lock().map_err(error_text)
+    }
 }
 
 #[derive(serde::Serialize)]
 struct SavedLibrary {
-    tracks: Vec<String>,
+    tracks: Vec<Track>,
     playlists: Vec<Playlist>,
-    favorites: Vec<String>,
-}
-
-fn playlists(connection: &Connection) -> rusqlite::Result<Vec<Playlist>> {
-    let mut query = connection.prepare(
-        "SELECT p.id, p.name, t.path
-         FROM playlists p
-         LEFT JOIN playlist_tracks pt ON pt.playlist_id = p.id
-         LEFT JOIN tracks t ON t.id = pt.track_id
-         ORDER BY p.id, pt.id",
-    )?;
-    let mut rows = query.query([])?;
-    let mut result: Vec<Playlist> = Vec::new();
-    while let Some(row) = rows.next()? {
-        let id = row.get(0)?;
-        if result.last().is_none_or(|playlist| playlist.id != id) {
-            result.push(Playlist {
-                id,
-                name: row.get(1)?,
-                tracks: Vec::new(),
-            });
-        }
-        if let Some(path) = row.get::<_, Option<String>>(2)? {
-            result
-                .last_mut()
-                .expect("playlist for current row")
-                .tracks
-                .push(path);
-        }
-    }
-    Ok(result)
+    favorites: Vec<i64>,
 }
 
 fn playlist_name(name: &str) -> Result<&str, String> {
@@ -68,10 +39,10 @@ fn playlist_name(name: &str) -> Result<&str, String> {
 #[tauri::command]
 fn create_playlist(library: State<'_, Library>, name: String) -> Result<Playlist, String> {
     let name = playlist_name(&name)?;
-    let connection = library.0.lock().map_err(|error| error.to_string())?;
+    let connection = library.lock()?;
     connection
         .execute("INSERT INTO playlists (name) VALUES (?1)", [name])
-        .map_err(|error| error.to_string())?;
+        .map_err(error_text)?;
     Ok(Playlist {
         id: connection.last_insert_rowid(),
         name: name.into(),
@@ -86,13 +57,13 @@ fn rename_playlist(
     name: String,
 ) -> Result<(), String> {
     let name = playlist_name(&name)?;
-    let connection = library.0.lock().map_err(|error| error.to_string())?;
-    let changed = connection
+    let changed = library
+        .lock()?
         .execute(
             "UPDATE playlists SET name = ?1 WHERE id = ?2",
             rusqlite::params![name, playlist_id],
         )
-        .map_err(|error| error.to_string())?;
+        .map_err(error_text)?;
     if changed == 0 {
         return Err("Playlist not found.".into());
     }
@@ -100,19 +71,11 @@ fn rename_playlist(
 }
 
 #[tauri::command]
-fn remove_playlist_track(
-    library: State<'_, Library>,
-    playlist_id: i64,
-    path: String,
-) -> Result<(), String> {
-    let connection = library.0.lock().map_err(|error| error.to_string())?;
-    connection
-        .execute(
-            "DELETE FROM playlist_tracks
-             WHERE playlist_id = ?1 AND track_id = (SELECT id FROM tracks WHERE path = ?2)",
-            rusqlite::params![playlist_id, path],
-        )
-        .map_err(|error| error.to_string())?;
+fn delete_playlist(library: State<'_, Library>, playlist_id: i64) -> Result<(), String> {
+    library
+        .lock()?
+        .execute("DELETE FROM playlists WHERE id = ?1", [playlist_id])
+        .map_err(error_text)?;
     Ok(())
 }
 
@@ -120,56 +83,98 @@ fn remove_playlist_track(
 fn add_playlist_track(
     library: State<'_, Library>,
     playlist_id: i64,
-    path: String,
+    track_id: i64,
 ) -> Result<(), String> {
-    let connection = library.0.lock().map_err(|error| error.to_string())?;
-    connection
+    library
+        .lock()?
         .execute(
-            "INSERT INTO playlist_tracks (playlist_id, track_id)
-         VALUES (?1, (SELECT id FROM tracks WHERE path = ?2))
-         ON CONFLICT(playlist_id, track_id) DO NOTHING",
-            rusqlite::params![playlist_id, path],
+            "INSERT INTO playlist_tracks (playlist_id, track_id) VALUES (?1, ?2)
+             ON CONFLICT(playlist_id, track_id) DO NOTHING",
+            rusqlite::params![playlist_id, track_id],
         )
-        .map_err(|error| error.to_string())?;
+        .map_err(error_text)?;
     Ok(())
 }
 
-fn favorite_paths(connection: &Connection) -> rusqlite::Result<Vec<String>> {
-    let mut query = connection.prepare(
-        "SELECT t.path FROM favorites f JOIN tracks t ON t.id = f.track_id ORDER BY f.id",
-    )?;
-    query.query_map([], |row| row.get(0))?.collect()
+#[tauri::command]
+fn remove_playlist_track(
+    library: State<'_, Library>,
+    playlist_id: i64,
+    track_id: i64,
+) -> Result<(), String> {
+    library
+        .lock()?
+        .execute(
+            "DELETE FROM playlist_tracks WHERE playlist_id = ?1 AND track_id = ?2",
+            rusqlite::params![playlist_id, track_id],
+        )
+        .map_err(error_text)?;
+    Ok(())
 }
 
 #[tauri::command]
-fn set_favorite(library: State<'_, Library>, path: String, favorite: bool) -> Result<(), String> {
-    let connection = library.0.lock().map_err(|error| error.to_string())?;
+fn set_favorite(library: State<'_, Library>, track_id: i64, favorite: bool) -> Result<(), String> {
     let sql = if favorite {
-        "INSERT INTO favorites (track_id) VALUES ((SELECT id FROM tracks WHERE path = ?1))
-         ON CONFLICT(track_id) DO NOTHING"
+        "INSERT INTO favorites (track_id) VALUES (?1) ON CONFLICT(track_id) DO NOTHING"
     } else {
-        "DELETE FROM favorites WHERE track_id = (SELECT id FROM tracks WHERE path = ?1)"
+        "DELETE FROM favorites WHERE track_id = ?1"
     };
-    connection
-        .execute(sql, [path])
-        .map_err(|error| error.to_string())?;
+    library
+        .lock()?
+        .execute(sql, [track_id])
+        .map_err(error_text)?;
+    Ok(())
+}
+
+/// Removes a track from the library, its playlists, and Favorites.
+/// The audio file stays where it is.
+#[tauri::command]
+fn remove_track(library: State<'_, Library>, track_id: i64) -> Result<(), String> {
+    if !db::remove_track(&*library.lock()?, track_id).map_err(error_text)? {
+        return Err("Track not found.".into());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn set_rating(
+    library: State<'_, Library>,
+    track_id: i64,
+    rating: Option<u8>,
+) -> Result<(), String> {
+    if rating.is_some_and(|stars| !(1..=5).contains(&stars)) {
+        return Err("Choose a rating from 1 to 5 stars.".into());
+    }
+    if !db::set_rating(&*library.lock()?, track_id, rating).map_err(error_text)? {
+        return Err("Track not found.".into());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn record_play(library: State<'_, Library>, track_id: i64) -> Result<db::PlayStats, String> {
+    db::record_play(&*library.lock()?, track_id)
+        .map_err(error_text)?
+        .ok_or_else(|| "Track not found.".into())
+}
+
+fn allow_tracks(app: &AppHandle, tracks: &[Track]) -> Result<(), String> {
+    let scope = app.asset_protocol_scope();
+    for path in tracks.iter().filter_map(Track::local_path) {
+        scope.allow_file(path).map_err(error_text)?;
+    }
     Ok(())
 }
 
 #[tauri::command]
 fn load_library(app: AppHandle, library: State<'_, Library>) -> Result<SavedLibrary, String> {
-    let connection = library.0.lock().map_err(|error| error.to_string())?;
-    let tracks = track_paths(&connection).map_err(|error| error.to_string())?;
-    let scope = app.asset_protocol_scope();
-    for track in &tracks {
-        scope.allow_file(track).map_err(|error| error.to_string())?;
-    }
-    let playlists = playlists(&connection).map_err(|error| error.to_string())?;
-    let favorites = favorite_paths(&connection).map_err(|error| error.to_string())?;
+    let connection = library.lock()?;
+    let tracks = db::tracks(&connection).map_err(error_text)?;
+    allow_tracks(&app, &tracks)?;
     Ok(SavedLibrary {
         tracks,
-        playlists,
-        favorites,
+        playlists: db::playlists(&connection).map_err(error_text)?,
+        favorites: db::favorites(&connection).map_err(error_text)?,
     })
 }
 
@@ -181,17 +186,9 @@ fn is_audio_path(path: &Path) -> bool {
         })
 }
 
-fn insert_tracks(connection: &Connection, paths: &[String]) -> rusqlite::Result<usize> {
-    let mut insert =
-        connection.prepare("INSERT INTO tracks (path) VALUES (?1) ON CONFLICT(path) DO NOTHING")?;
-    paths
-        .iter()
-        .try_fold(0, |added, path| Ok(added + insert.execute([path])?))
-}
-
 #[derive(serde::Serialize)]
 struct ImportedArchive {
-    paths: Vec<String>,
+    tracks: Vec<Track>,
     added: usize,
 }
 
@@ -199,28 +196,36 @@ struct ImportedArchive {
 async fn import_archive(app: AppHandle, path: String) -> Result<ImportedArchive, String> {
     tauri::async_runtime::spawn_blocking(move || import_archive_on_disk(&app, &path))
         .await
-        .map_err(|error| error.to_string())?
+        .map_err(error_text)?
+}
+
+fn is_zip_path(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("zip"))
 }
 
 fn import_archive_on_disk(app: &AppHandle, path: &str) -> Result<ImportedArchive, String> {
     let file = Path::new(path);
-    let scope = app.asset_protocol_scope();
     if !file.is_absolute()
-        || !file
-            .extension()
-            .is_some_and(|extension| extension.eq_ignore_ascii_case("zip"))
-        || !scope.is_allowed(file)
+        || !is_zip_path(file)
+        || !app.asset_protocol_scope().is_allowed(file)
         || !file.is_file()
     {
         return Err("Select a ZIP file available on disk.".into());
     }
+    import_zip(app, file)
+}
 
+/// Copies the audio in a ZIP to app storage and adds it to the library.
+/// The caller checks that `file` is a ZIP the app may read.
+fn import_zip(app: &AppHandle, file: &Path) -> Result<ImportedArchive, String> {
+    let scope = app.asset_protocol_scope();
     let media_directory = app
         .path()
         .app_local_data_dir()
-        .map_err(|error| error.to_string())?
+        .map_err(error_text)?
         .join("imports");
-    let staged = zip_import::stage(file, &media_directory).map_err(|error| error.to_string())?;
+    let staged = zip_import::stage(file, &media_directory).map_err(error_text)?;
     let paths: Vec<String> = staged
         .tracks
         .iter()
@@ -232,24 +237,23 @@ fn import_archive_on_disk(app: &AppHandle, path: &str) -> Result<ImportedArchive
         .collect::<Result<_, _>>()?;
 
     let library = app.state::<Library>();
-    let mut connection = library.0.lock().map_err(|error| error.to_string())?;
+    let mut connection = library.lock()?;
     let transaction = connection
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-        .map_err(|error| error.to_string())?;
-    let added = insert_tracks(&transaction, &paths).map_err(|error| error.to_string())?;
+        .map_err(error_text)?;
+    let (mut tracks, added) = db::insert_local_tracks(&transaction, &paths).map_err(error_text)?;
     let publish = !staged.destination.exists();
     if publish {
-        fs::rename(staged.directory.path(), &staged.destination)
-            .map_err(|error| error.to_string())?;
+        fs::rename(staged.directory.path(), &staged.destination).map_err(error_text)?;
     }
     let finish = || -> Result<(), String> {
         for track in &staged.tracks {
             if !track.is_file() {
                 return Err("An imported audio file is missing from local storage.".into());
             }
-            scope.allow_file(track).map_err(|error| error.to_string())?;
+            scope.allow_file(track).map_err(error_text)?;
         }
-        transaction.commit().map_err(|error| error.to_string())
+        transaction.commit().map_err(error_text)
     };
     if let Err(error) = finish() {
         if publish {
@@ -257,8 +261,12 @@ fn import_archive_on_disk(app: &AppHandle, path: &str) -> Result<ImportedArchive
         }
         return Err(error);
     }
+    // The files were staged elsewhere when the tracks were read, so recheck them.
+    for track in &mut tracks {
+        track.missing = false;
+    }
 
-    Ok(ImportedArchive { paths, added })
+    Ok(ImportedArchive { tracks, added })
 }
 
 #[tauri::command]
@@ -266,7 +274,7 @@ fn save_tracks(
     app: AppHandle,
     library: State<'_, Library>,
     paths: Vec<String>,
-) -> Result<(), String> {
+) -> Result<Vec<Track>, String> {
     let scope = app.asset_protocol_scope();
     for path in &paths {
         let file = Path::new(path);
@@ -276,12 +284,37 @@ fn save_tracks(
         }
     }
 
-    let mut connection = library.0.lock().map_err(|error| error.to_string())?;
-    let transaction = connection
-        .transaction()
-        .map_err(|error| error.to_string())?;
-    insert_tracks(&transaction, &paths).map_err(|error| error.to_string())?;
-    transaction.commit().map_err(|error| error.to_string())
+    let mut connection = library.lock()?;
+    let transaction = connection.transaction().map_err(error_text)?;
+    let (tracks, _) = db::insert_local_tracks(&transaction, &paths).map_err(error_text)?;
+    transaction.commit().map_err(error_text)?;
+    Ok(tracks)
+}
+
+#[tauri::command]
+fn list_watched_folders(library: State<'_, Library>) -> Result<Vec<db::WatchedFolder>, String> {
+    db::watched_folders(&*library.lock()?).map_err(error_text)
+}
+
+/// Starts importing new MP3, WAV, and ZIP files from a folder, including the ones already there.
+#[tauri::command]
+fn add_watched_folder(app: AppHandle, path: String) -> Result<db::WatchedFolder, String> {
+    let folder = Path::new(&path);
+    if !folder.is_absolute() || !folder.is_dir() {
+        return Err("Select a folder available on disk.".into());
+    }
+    let added =
+        db::add_watched_folder(&*app.state::<Library>().lock()?, &path).map_err(error_text)?;
+    watch::start(&app)?;
+    watch::scan_in_background(&app, vec![added.clone()]);
+    Ok(added)
+}
+
+/// Stops watching a folder. Tracks already imported from it stay in the library.
+#[tauri::command]
+fn remove_watched_folder(app: AppHandle, folder_id: i64) -> Result<(), String> {
+    db::remove_watched_folder(&*app.state::<Library>().lock()?, folder_id).map_err(error_text)?;
+    watch::start(&app)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -291,29 +324,15 @@ pub fn run() {
         .setup(|app| {
             let directory = app.path().app_local_data_dir()?;
             fs::create_dir_all(&directory)?;
-            let connection = Connection::open(directory.join("library.sqlite3"))?;
-            connection.execute_batch(
-                "PRAGMA foreign_keys = ON;
-                 CREATE TABLE IF NOT EXISTS tracks (
-                    id INTEGER PRIMARY KEY,
-                    path TEXT NOT NULL UNIQUE
-                );
-                CREATE TABLE IF NOT EXISTS favorites (
-                    id INTEGER PRIMARY KEY,
-                    track_id INTEGER NOT NULL UNIQUE REFERENCES tracks(id)
-                );
-                CREATE TABLE IF NOT EXISTS playlists (
-                    id INTEGER PRIMARY KEY,
-                    name TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS playlist_tracks (
-                    id INTEGER PRIMARY KEY,
-                    playlist_id INTEGER NOT NULL REFERENCES playlists(id),
-                    track_id INTEGER NOT NULL REFERENCES tracks(id),
-                    UNIQUE (playlist_id, track_id)
-                );",
-            )?;
+            let connection = db::open(&directory.join("library.sqlite3"))?;
+            let folders = db::watched_folders(&connection)?;
             app.manage(Library(Mutex::new(connection)));
+            app.manage(watch::Watcher::default());
+            let handle = app.handle();
+            if let Err(error) = watch::start(handle) {
+                eprintln!("Could not watch folders: {error}");
+            }
+            watch::scan_in_background(handle, folders);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -322,11 +341,18 @@ pub fn run() {
             track_metadata::read_track_artwork,
             save_tracks,
             import_archive,
+            remove_track,
+            set_rating,
+            record_play,
             set_favorite,
             create_playlist,
-            add_playlist_track,
             rename_playlist,
-            remove_playlist_track
+            delete_playlist,
+            add_playlist_track,
+            remove_playlist_track,
+            list_watched_folders,
+            add_watched_folder,
+            remove_watched_folder
         ])
         .run(tauri::generate_context!())
         .expect("error while running Infinity One");

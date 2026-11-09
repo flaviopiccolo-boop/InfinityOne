@@ -1,9 +1,21 @@
-export function trackName(path: string) {
-  return path.split(/[\\/]/).pop() ?? path;
+import type { Track } from "../types";
+
+/** The file name of a track, or its location for sources without files. */
+export function trackName(track: Track) {
+  return track.location.split(/[\\/]/).pop() ?? track.location;
 }
 
-export function shuffleTracks(paths: string[]) {
-  const shuffled = [...paths];
+/** The embedded title tag, or the file name when the track has none. */
+export function trackTitle(track: Track, tags?: { title: string | null }) {
+  return tags?.title ?? trackName(track);
+}
+
+export function trackFormat(track: Track) {
+  return track.location.split(".").pop()?.toUpperCase();
+}
+
+export function shuffleTracks<T>(items: T[]) {
+  const shuffled = [...items];
   for (let index = shuffled.length - 1; index > 0; index--) {
     const target = Math.floor(Math.random() * (index + 1));
     [shuffled[index], shuffled[target]] = [shuffled[target], shuffled[index]];
@@ -11,15 +23,10 @@ export function shuffleTracks(paths: string[]) {
   return shuffled;
 }
 
-export function withTrack(paths: string[], path: string) {
-  return [...new Set([...paths, path])];
+export function withTrack<T>(items: T[], item: T) {
+  return [...new Set([...items, item])];
 }
 
-export function withoutTrack(paths: string[], path: string) {
-  return paths.filter((track) => track !== path);
-}
-
-/** The embedded title tag, or the filename when the track has none. */
-export function trackTitle(path: string, tags?: { title: string | null }) {
-  return tags?.title ?? trackName(path);
+export function withoutTrack<T>(items: T[], item: T) {
+  return items.filter((entry) => entry !== item);
 }

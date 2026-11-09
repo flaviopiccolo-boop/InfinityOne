@@ -1,5 +1,6 @@
 import { useEffect, useEffectEvent } from "react";
 import type { RefObject } from "react";
+import type { TrackId } from "../types";
 
 function play(audio: HTMLAudioElement) {
   void audio.play().catch(() => {
@@ -9,13 +10,16 @@ function play(audio: HTMLAudioElement) {
 
 export function usePlaybackControls(
   audioRef: RefObject<HTMLAudioElement | null>,
-  activeTrack: string | undefined,
+  activeTrack: TrackId | undefined,
   title: string | undefined,
-  previousTrack: string | undefined,
-  nextTrack: string | undefined,
-  selectTrack: (path: string) => void,
+  previousTrack: TrackId | undefined,
+  nextTrack: TrackId | undefined,
+  selectTrack: (track: TrackId) => void,
+  /** Rates the active track; `advance` also skips to the next track. */
+  rate: (rating: number | null, advance: boolean) => void,
 ) {
-  const skipTo = useEffectEvent((path: string) => selectTrack(path));
+  const skipTo = useEffectEvent((track: TrackId) => selectTrack(track));
+  const rateActive = useEffectEvent(rate);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -48,7 +52,18 @@ export function usePlaybackControls(
         || target.isContentEditable || target.closest("input, textarea, select")) return;
 
       const audio = audioRef.current;
-      if (!audio || event.altKey || event.metaKey || event.shiftKey) return;
+      if (!audio || event.altKey || event.metaKey) return;
+
+      // 1–5 rate the playing track and 0 clears its rating. With Shift, playback moves to the next track.
+      const digit = /^Digit([0-5])$/.exec(event.code);
+      if (digit && !event.ctrlKey) {
+        event.preventDefault();
+        if (event.repeat) return;
+        const stars = Number(digit[1]);
+        rateActive(stars === 0 ? null : stars, event.shiftKey);
+        return;
+      }
+      if (event.shiftKey) return;
 
       if (event.code === "Space" && !event.ctrlKey && !target.closest("button, a, audio, [role=button]")) {
         event.preventDefault();
