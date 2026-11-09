@@ -7,6 +7,7 @@ import type { PlaybackPosition } from "./playbackPosition";
 import { usePlaybackControls } from "./usePlaybackControls";
 import { formatDuration, useTrackMetadata } from "./useTrackMetadata";
 import TitleBar from "./TitleBar";
+import ActionMenu from "./ActionMenu";
 import "./App.css";
 
 type Playlist = { id: number; name: string; tracks: string[] };
@@ -59,7 +60,6 @@ export default function App() {
   const [editor, setEditor] = useState<number | "new">();
   const [search, setSearch] = useState("");
   const [name, setName] = useState("");
-  const [candidate, setCandidate] = useState("");
 
   const { metadata, cover, clearCover } = useTrackMetadata(tracks, active);
   const activeMetadata = active ? metadata[active] : undefined;
@@ -174,7 +174,6 @@ export default function App() {
     setNotice("");
     setView(id);
     setSearch("");
-    setCandidate("");
     setError("");
   }
 
@@ -225,7 +224,6 @@ export default function App() {
         if (current?.id !== item.id || (action === "remove" && path === active)) return current;
         return { ...current, tracks: updateTracks(current.tracks) };
       });
-      setCandidate((current) => current === path ? "" : current);
     } catch {
       setError(action === "add" ? "Could not add the track to the playlist." : "Could not remove the track from the playlist.");
     } finally {
@@ -397,7 +395,8 @@ export default function App() {
       <TitleBar search={search} onSearch={setSearch} />
       <aside className="sidebar">
         <div className="wordmark">
-          <img src="/m8-wordmark.svg" alt="M8" />
+          <img src="/infinity-one.svg" alt="" />
+          <span>Infinity One</span>
           <p>All your music. One place.</p>
         </div>
         <nav aria-label="Library and playlists">
@@ -454,16 +453,16 @@ export default function App() {
               <span>{displayedCount} {displayedCount === 1 ? "track" : "tracks"}</span>
             </div>
             {playlist && availableTracks.length > 0 && (
-              <form className="add-track" onSubmit={(event) => {
-                event.preventDefault();
-                if (availableTracks.includes(candidate)) void changePlaylistTrack(playlist, candidate, "add");
-              }}>
-                <select aria-label="Track from library" value={candidate} onChange={(event) => setCandidate(event.target.value)}>
-                  <option value="">Choose a track…</option>
-                  {availableTracks.map((path) => <option key={path} value={path}>{trackName(path)}</option>)}
-                </select>
-                <button className="secondary" disabled={!candidate || busy}>Add</button>
-              </form>
+              <ActionMenu label="Add tracks to playlist" icon="add" disabled={busy}
+                groups={[{
+                  label: "Add tracks",
+                  actions: availableTracks.map((path) => ({
+                    id: path,
+                    icon: "track",
+                    label: displayTitle(path),
+                    onSelect: () => void changePlaylistTrack(playlist, path, "add"),
+                  })),
+                }]} />
             )}
           </div>
           {loading ? (
@@ -501,31 +500,28 @@ export default function App() {
                       onClick={() => void toggleFavorite(path)}>
                       <span aria-hidden="true">{favoritePaths.has(path) ? "♥" : "♡"}</span>
                     </button>
-                    <select className="row-action" aria-label={`Queue actions for ${trackName(path)}`} value=""
-                      disabled={path === active} onChange={(event) => {
-                        const placement = event.target.value;
-                        if (placement === "next" || placement === "end") scheduleTrack(path, placement);
-                      }}>
-                      <option value="" disabled>Queue actions</option>
-                      <option value="next">Play next</option>
-                      <option value="end">Add to queue</option>
-                    </select>
-                    {playlist ? (
-                      <button className="secondary row-action" disabled={busy}
-                        aria-label={`Remove ${trackName(path)} from playlist`}
-                        onClick={() => changePlaylistTrack(playlist, path, "remove")}>Remove</button>
-                    ) : playlists.length > 0 && (
-                      <select className="row-action" aria-label={`Add ${trackName(path)} to playlist`} value="" disabled={busy}
-                        onChange={(event) => {
-                          const target = playlists.find((item) => String(item.id) === event.target.value);
-                          if (target) void changePlaylistTrack(target, path, "add");
-                        }}>
-                        <option value="" disabled>Add to playlist</option>
-                        {playlists.map((item) => (
-                          <option key={item.id} value={item.id} disabled={item.tracks.includes(path)}>{item.name}</option>
-                        ))}
-                      </select>
-                    )}
+                    <ActionMenu label={`More actions for ${displayTitle(path)}`} icon="more" groups={[
+                      { actions: [
+                        { id: "next", icon: "next", label: "Play next", disabled: path === active,
+                          onSelect: () => scheduleTrack(path, "next") },
+                        { id: "queue", icon: "queue", label: "Add to queue", disabled: path === active,
+                          onSelect: () => scheduleTrack(path, "end") },
+                        ...(playlist ? [{
+                          id: "remove", icon: "remove" as const, label: "Remove from playlist", disabled: busy,
+                          onSelect: () => void changePlaylistTrack(playlist, path, "remove"),
+                        }] : []),
+                      ] },
+                      ...(!playlist && playlists.length ? [{
+                        label: "Add to playlist",
+                        actions: playlists.map((item) => ({
+                          id: String(item.id),
+                          icon: "playlist" as const,
+                          label: item.name,
+                          disabled: busy || item.tracks.includes(path),
+                          onSelect: () => void changePlaylistTrack(item, path, "add"),
+                        })),
+                      }] : []),
+                    ]} />
                   </li>
                 );
               })}
@@ -537,7 +533,7 @@ export default function App() {
         <section className="now-card">
           <h2 id="now-panel-title">Now Playing</h2>
           <div className="now-cover" aria-hidden="true">
-            {cover ? <img src={cover} alt="" onError={clearCover} /> : <img src="/m8.svg" alt="" className="cover-placeholder" />}
+            {cover ? <img src={cover} alt="" onError={clearCover} /> : <img src="/infinity-one.svg" alt="" className="cover-placeholder" />}
           </div>
           <div className="now-details">
             <div className="now-copy">
@@ -585,26 +581,37 @@ export default function App() {
         </div>
         <div className="transport">
           <div className="transport-buttons">
-            <button className="secondary playback-mode" type="button" aria-pressed={shuffle}
-              onClick={toggleShuffle}>Shuffle</button>
-            <button className="secondary skip-track" type="button" aria-label="Previous track" aria-keyshortcuts="Control+ArrowLeft" title="Previous track (Ctrl+Left)"
+            <button className="player-icon" type="button" aria-label="Shuffle" aria-pressed={shuffle}
+              title={shuffle ? "Shuffle on" : "Shuffle off"} onClick={toggleShuffle}>
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M3 6h3c3 0 5 4 6 6s3 6 6 6h3m-3-3 3 3-3 3M3 18h3c1.4 0 2.6-.9 3.6-2.1m4.8-7.8C15.4 6.9 16.6 6 18 6h3m-3-3 3 3-3 3" />
+              </svg>
+            </button>
+            <button className="player-icon skip-track" type="button" aria-label="Previous track" aria-keyshortcuts="Control+ArrowLeft" title="Previous track (Ctrl+Left)"
               disabled={!previousTrack} onClick={() => {
                 if (previousTrack) selectTrack(previousTrack);
               }}>
               <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 4h2v12H5zm10 0L7 10l8 6z" /></svg>
             </button>
             <button className="play-button" type="button" aria-label={playback.playing ? "Pause" : "Play"}
+              title={playback.playing ? "Pause" : "Play"}
               disabled={!active && !visibleTracks.length} onClick={togglePlayback}>
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 {playback.playing ? <path d="M7 5h4v14H7zm6 0h4v14h-4z" /> : <path d="M8 4v16l13-8z" />}
               </svg>
             </button>
-            <button className="secondary skip-track" type="button" aria-label="Next track" aria-keyshortcuts="Control+ArrowRight" title="Next track (Ctrl+Right)"
+            <button className="player-icon skip-track" type="button" aria-label="Next track" aria-keyshortcuts="Control+ArrowRight" title="Next track (Ctrl+Right)"
               disabled={!nextTrack} onClick={playNext}>
               <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M13 4h2v12h-2zM5 4l8 6-8 6z" /></svg>
             </button>
-            <button className="secondary playback-mode" type="button" data-active={repeat !== "off"}
-              onClick={() => setRepeat((mode) => nextRepeatMode[mode])}>Repeat: {repeat}</button>
+            <button className="player-icon" type="button" data-active={repeat !== "off"}
+              aria-label={`Repeat: ${repeat}`} title={`Repeat: ${repeat}`}
+              onClick={() => setRepeat((mode) => nextRepeatMode[mode])}>
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="m17 3 4 4-4 4m4-4H7a4 4 0 0 0-4 4m4 10-4-4 4-4m-4 4h14a4 4 0 0 0 4-4" />
+                {repeat === "one" && <path d="m10.5 11 1.5-1v4" />}
+              </svg>
+            </button>
           </div>
           <div className="seek-controls">
             <span>{formatDuration(playback.seconds)}</span>
@@ -650,8 +657,8 @@ export default function App() {
           )}
         </div>
         <div className="playback-options">
-          <button className="volume-button" type="button" aria-label={muted ? "Unmute" : "Mute"}
-            onClick={() => setMuted(!muted)}>
+          <button className="player-icon" type="button" aria-label={muted ? "Unmute" : "Mute"}
+            title={muted ? "Unmute" : "Mute"} onClick={() => setMuted(!muted)}>
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M3 9h4l5-4v14l-5-4H3z"/>
               {muted ? <path d="m16 9 5 6m0-6-5 6"/> : <path d="M16 9a4 4 0 0 1 0 6m2-8a7 7 0 0 1 0 10"/>}
@@ -663,8 +670,12 @@ export default function App() {
               setVolume(event.target.valueAsNumber);
               setMuted(false);
             }} />
-          <button className="secondary queue-toggle" type="button" aria-expanded={queueOpen}
-            aria-controls="playback-queue" onClick={() => setQueueOpen((open) => !open)}>Queue</button>
+          <button className="player-icon queue-toggle" type="button" aria-label="Queue" title="Queue"
+            aria-expanded={queueOpen} aria-controls="playback-queue" onClick={() => setQueueOpen((open) => !open)}>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 6h16M4 11h16M4 16h8m4-1 5 3-5 3z" />
+            </svg>
+          </button>
         </div>
         <section id="playback-queue" className="queue-panel" aria-labelledby="queue-title" hidden={!queueOpen}>
           <h2 id="queue-title">Up next</h2>

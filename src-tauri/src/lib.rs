@@ -329,5 +329,5 @@ pub fn run() {
             remove_playlist_track
         ])
         .run(tauri::generate_context!())
-        .expect("error while running M8");
+        .expect("error while running Infinity One");
 }

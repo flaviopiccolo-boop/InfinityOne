@@ -2,5 +2,5 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
 fn main() {
-    m8_lib::run()
+    infinity_one_lib::run()
 }

@@ -23,7 +23,7 @@ export function usePlaybackControls(
     if (!activeTrack || !audio || !session) return;
 
     if (typeof MediaMetadata !== "undefined" && title) {
-      session.metadata = new MediaMetadata({ title, artist: "M8" });
+      session.metadata = new MediaMetadata({ title, artist: "Infinity One" });
     }
     const syncState = () => {
       session.playbackState = audio.paused || audio.ended ? "paused" : "playing";

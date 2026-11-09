@@ -1486,6 +1486,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "infinity-one"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "lofty",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tempfile",
+ "zip",
+]
+
+[[package]]
 name = "ipnet"
 version = "2.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1780,23 +1797,6 @@ name = "log"
 version = "0.4.35"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d15f86d12da44cd8d4ec3c73984537eb7f4cadcb9776a575a0a8a05ca11005c"
-
-[[package]]
-name = "m8"
-version = "0.1.0"
-dependencies = [
- "base64 0.22.1",
- "lofty",
- "rusqlite",
- "serde",
- "serde_json",
- "sha2",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tempfile",
- "zip",
-]
 
 [[package]]
 name = "markup5ever"
