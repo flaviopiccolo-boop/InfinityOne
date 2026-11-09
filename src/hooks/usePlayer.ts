@@ -4,10 +4,18 @@ import type { PlaybackPosition } from "../lib/playbackPosition";
 import type { TrackId, View } from "../types";
 
 const stopped = { seconds: 0, duration: 0, playing: false };
+/** A load of a track counts as a play after this much listening, or half of a shorter track. */
+const playThresholdSeconds = 30;
+
+type PlayerEvents = {
+  /** Called once per load of a track, after it has played long enough to count. */
+  onPlayed: (track: TrackId) => void;
+};
 
 /** The active track, its `<audio>` element, playback progress, volume, and saved position. */
-export function usePlayer() {
+export function usePlayer({ onPlayed }: PlayerEvents) {
   const audioRef = useRef<HTMLAudioElement>(null);
+  const counted = useRef<TrackId | undefined>(undefined);
   const lastPosition = useRef<PlaybackPosition | undefined>(undefined);
   const [active, setActive] = useState<TrackId>();
   const [resumeAt, setResumeAt] = useState<number>();
@@ -27,6 +35,7 @@ export function usePlayer() {
   /** Loads a track and plays it from the start. */
   function selectTrack(track: TrackId) {
     if (track === active) return;
+    counted.current = undefined;
     setPlayback(stopped);
     setFailedTrack(undefined);
     setResumeAt(undefined);
@@ -35,6 +44,7 @@ export function usePlayer() {
 
   /** Loads a track paused at a saved position. */
   function resume(track: TrackId, seconds: number) {
+    counted.current = undefined;
     setResumeAt(seconds);
     setActive(track);
   }
@@ -60,6 +70,15 @@ export function usePlayer() {
 
     savePlaybackPosition(position);
     lastPosition.current = position;
+  }
+
+  /** Counts a play of the active track once it has played long enough. */
+  function countPlay(audio: HTMLAudioElement) {
+    if (active === undefined || counted.current === active || audio.paused) return;
+    const duration = Number.isFinite(audio.duration) ? audio.duration : Infinity;
+    if (audio.currentTime < Math.min(playThresholdSeconds, duration / 2)) return;
+    counted.current = active;
+    onPlayed(active);
   }
 
   function syncPlayback(audio: HTMLAudioElement) {
@@ -111,6 +130,7 @@ export function usePlayer() {
     resume,
     stop,
     savePosition,
+    countPlay,
     syncPlayback,
     restorePosition,
     seek,

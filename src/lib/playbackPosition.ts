@@ -35,7 +35,7 @@ export function loadPlaybackPosition(findTrack: (path: string) => TrackId | unde
   return {
     track,
     seconds,
-    source: source === "favorites" || Number.isSafeInteger(source) ? source as View : undefined,
+    source: typeof source === "string" || Number.isSafeInteger(source) ? source as View : undefined,
   };
 }
 

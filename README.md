@@ -28,6 +28,18 @@ Use **Search tracks** to filter the current library or playlist. Open the track�
 
 To remove a track from the library, open its **More actions** menu and choose **Remove from library**. This also removes it from your playlists and Favorites, but the audio file stays on disk. Open a playlist and choose **Delete playlist** to delete it; its tracks stay in your library. Tracks whose file was moved or deleted are dimmed and marked **File not found**.
 
+## Ratings and smart playlists
+
+Rate a track from 1 to 5 stars with the stars beside it or under **Now Playing**. Select the current rating again to clear it. While a track plays, press **1**–**5** to rate it or **0** to clear the rating; hold **Shift** to rate and skip to the next track. This makes it quick to sort through a new batch: open **Unrated**, start playing, and rate each track as you go.
+
+A track counts as played after 30 seconds of playback, or half of a shorter track. The **Smart playlists** section updates automatically:
+
+- **Unrated**: tracks without a rating.
+- **Top rated**: 4 and 5 stars, best first.
+- **Recently added**: added in the last 7 days, newest first. Tracks added before ratings existed count as added on the day you upgraded.
+- **Most played**: your 50 most played tracks.
+- **Never played**: tracks you have not listened to yet.
+
 ## Import a ZIP archive
 
 Choose **Import ZIP** to add MP3 and WAV tracks from an archive, including a batch download from Google Flow Music. Infinity One copies the audio to its local app storage, so the original ZIP can be moved after import. Importing the same ZIP again skips existing tracks. The maximum is 2 GiB per archive or batch of extracted audio and 512 MiB per track.
@@ -49,6 +61,7 @@ Infinity One saves the active track and playback position locally. When you reop
 - **Space** plays or pauses the selected track when focus is outside an interactive control.
 - **Ctrl+Left Arrow** selects the previous track.
 - **Ctrl+Right Arrow** selects the next track.
+- **1**–**5** rate the playing track, **0** clears its rating, and **Shift** with a number also skips to the next track.
 
 Infinity One also exposes play, pause, previous track, and next track through Media Session. Windows and hardware media controls depend on the WebView2 runtime and device.
 

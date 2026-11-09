@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
+import { smartPlaylists } from "../lib/smartPlaylists";
 import type { Playlist, View } from "../types";
 
 /** The playlist being created ("new") or renamed (its id). */
@@ -34,6 +35,15 @@ export default function Sidebar({
         <button className="nav-item" aria-current={view === "favorites" ? "page" : undefined} onClick={() => onNavigate("favorites")}>
           <span aria-hidden="true">♥</span> Favorites
         </button>
+        <div className="nav-heading">
+          <span>Smart playlists</span>
+        </div>
+        {smartPlaylists.map((item) => (
+          <button key={item.id} className="nav-item" title={item.description}
+            aria-current={view === item.id ? "page" : undefined} onClick={() => onNavigate(item.id)}>
+            <span aria-hidden="true">✦</span><span className="truncate">{item.name}</span>
+          </button>
+        ))}
         <div className="nav-heading">
           <span>Playlists</span>
           <button className="icon-button" aria-label="New playlist" disabled={loading || busy} onClick={onNewPlaylist}>+</button>

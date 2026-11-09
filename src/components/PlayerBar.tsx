@@ -96,6 +96,7 @@ export default function PlayerBar({
             onTimeUpdate={(event) => {
               player.syncPlayback(event.currentTarget);
               player.savePosition(event.currentTarget, source);
+              player.countPlay(event.currentTarget);
             }}
             onPause={(event) => {
               player.syncPlayback(event.currentTarget);

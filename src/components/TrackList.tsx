@@ -1,4 +1,6 @@
 import ActionMenu from "./ActionMenu";
+import Rating from "./Rating";
+import { findSmartPlaylist } from "../lib/smartPlaylists";
 import { formatDuration } from "../hooks/useTrackMetadata";
 import type { TrackMetadata } from "../hooks/useTrackMetadata";
 import { trackFormat, trackName, trackTitle } from "../lib/tracks";
@@ -24,11 +26,12 @@ type TrackListProps = {
   onSchedule: (track: TrackId, placement: "next" | "end") => void;
   onSetPlaylistTrack: (playlist: Playlist, track: TrackId, included: boolean) => void;
   onRemove: (track: Track) => void;
+  onRate: (track: TrackId, rating: number | null) => void;
 };
 
 export default function TrackList({
   view, playlist, playlists, tracks, availableTracks, search, active, metadata, favorites, loading, busy,
-  onPlay, onToggleFavorite, onSchedule, onSetPlaylistTrack, onRemove,
+  onPlay, onToggleFavorite, onSchedule, onSetPlaylistTrack, onRemove, onRate,
 }: TrackListProps) {
   const title = (track: Track) => trackTitle(track, metadata[track.id]);
   const query = search.trim().toLocaleLowerCase();
@@ -61,11 +64,11 @@ export default function TrackList({
       {loading ? (
         <p className="empty" role="status">Loading library…</p>
       ) : tracks.length === 0 ? (
-        <p className="empty">{view === "favorites"
+        <p className="empty">{findSmartPlaylist(view)?.empty ?? (view === "favorites"
           ? "Select the heart next to a track to add it here."
           : playlist && availableTracks.length
             ? "Choose a track from your library to add."
-            : "Import MP3 or WAV files to get started."}</p>
+            : "Import MP3 or WAV files to get started.")}</p>
       ) : matches.length === 0 ? (
         <p className="empty" role="status">No tracks match your search.</p>
       ) : (
@@ -91,6 +94,8 @@ export default function TrackList({
                     {tags && tags.durationSeconds > 0 ? ` · ${formatDuration(tags.durationSeconds)}` : ""}
                   </span>
                 </button>
+                <Rating compact value={track.rating} label={trackName(track)} disabled={busy}
+                  onChange={(rating) => onRate(id, rating)} />
                 <button className="favorite-button" type="button" disabled={busy}
                   aria-label={`Favorite ${trackName(track)}`} aria-pressed={favorite}
                   title={favorite ? "Remove from favorites" : "Add to favorites"}

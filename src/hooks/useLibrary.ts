@@ -68,6 +68,21 @@ export function useLibrary({ onLoaded, onLoadError }: LibraryEvents) {
     setPlaylists((current) => current.map((item) => ({ ...item, tracks: withoutTrack(item.tracks, trackId) })));
   }
 
+  function updateTrack(trackId: TrackId, changes: Partial<Track>) {
+    setTracks((current) => current.map((track) => track.id === trackId ? { ...track, ...changes } : track));
+  }
+
+  /** Sets 1 to 5 stars, or clears the rating with null. */
+  async function setRating(trackId: TrackId, rating: number | null) {
+    await invoke("set_rating", { trackId, rating });
+    updateTrack(trackId, { rating });
+  }
+
+  async function recordPlay(trackId: TrackId) {
+    const stats = await invoke<Pick<Track, "playCount" | "lastPlayedAt">>("record_play", { trackId });
+    updateTrack(trackId, stats);
+  }
+
   async function createPlaylist(name: string) {
     const created = await invoke<Playlist>("create_playlist", { name });
     setPlaylists((current) => [...current, created]);
@@ -107,6 +122,8 @@ export function useLibrary({ onLoaded, onLoadError }: LibraryEvents) {
     saveTracks,
     importArchive,
     removeTrack,
+    setRating,
+    recordPlay,
     createPlaylist,
     renamePlaylist,
     deletePlaylist,

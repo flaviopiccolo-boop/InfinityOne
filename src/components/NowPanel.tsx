@@ -1,3 +1,4 @@
+import Rating from "./Rating";
 import type { TrackId } from "../types";
 
 type NowPanelProps = {
@@ -7,6 +8,8 @@ type NowPanelProps = {
   cover: string | undefined;
   onCoverError: () => void;
   favorite: boolean;
+  rating: number | null;
+  onRate: (track: TrackId, rating: number | null) => void;
   busy: boolean;
   onToggleFavorite: (track: TrackId) => void;
   /** The first upcoming tracks with their display titles. */
@@ -17,7 +20,7 @@ type NowPanelProps = {
 };
 
 export default function NowPanel({
-  active, title, artist, cover, onCoverError, favorite, busy, onToggleFavorite,
+  active, title, artist, cover, onCoverError, favorite, rating, onRate, busy, onToggleFavorite,
   upcoming, queueOpen, onToggleQueue, onSelect,
 }: NowPanelProps) {
   return (
@@ -31,6 +34,9 @@ export default function NowPanel({
           <div className="now-copy">
             <h3>{title ?? "Nothing playing yet"}</h3>
             <p>{artist ?? (active ? "Local track" : "Choose a track to get started.")}</p>
+            {active !== undefined && title && (
+              <Rating value={rating} label={title} disabled={busy} onChange={(stars) => onRate(active, stars)} />
+            )}
           </div>
           {active && (
             <button className="favorite-button" type="button" disabled={busy} aria-label="Favorite current track"

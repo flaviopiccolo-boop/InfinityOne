@@ -58,6 +58,13 @@ const MIGRATIONS: &[&str] = &[
     INSERT INTO playlist_tracks_v2 SELECT id, playlist_id, track_id FROM playlist_tracks;
     DROP TABLE playlist_tracks;
     ALTER TABLE playlist_tracks_v2 RENAME TO playlist_tracks;",
+    // 3: ratings, play statistics, and when each track was added. Tracks added
+    // before this migration get the migration time.
+    "ALTER TABLE tracks ADD COLUMN added_at INTEGER NOT NULL DEFAULT 0;
+    UPDATE tracks SET added_at = unixepoch();
+    ALTER TABLE tracks ADD COLUMN rating INTEGER CHECK (rating BETWEEN 1 AND 5);
+    ALTER TABLE tracks ADD COLUMN play_count INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE tracks ADD COLUMN last_played_at INTEGER;",
 ];
 
 pub(crate) fn open(path: &Path) -> rusqlite::Result<Connection> {
@@ -98,13 +105,23 @@ fn migrate(connection: &mut Connection) -> rusqlite::Result<()> {
 }
 
 #[derive(serde::Serialize, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct Track {
     pub(crate) id: i64,
     pub(crate) source: String,
     pub(crate) location: String,
     /// A local file that is no longer on disk.
     pub(crate) missing: bool,
+    /// 1 to 5 stars, or `None` when unrated.
+    pub(crate) rating: Option<u8>,
+    pub(crate) play_count: i64,
+    /// Unix seconds.
+    pub(crate) last_played_at: Option<i64>,
+    /// Unix seconds.
+    pub(crate) added_at: i64,
 }
+
+const TRACK_COLUMNS: &str = "id, source, location, rating, play_count, last_played_at, added_at";
 
 impl Track {
     pub(crate) fn local_path(&self) -> Option<&Path> {
@@ -121,11 +138,16 @@ fn track_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Track> {
         source,
         location,
         missing,
+        rating: row.get(3)?,
+        play_count: row.get(4)?,
+        last_played_at: row.get(5)?,
+        added_at: row.get(6)?,
     })
 }
 
 pub(crate) fn tracks(connection: &Connection) -> rusqlite::Result<Vec<Track>> {
-    let mut query = connection.prepare("SELECT id, source, location FROM tracks ORDER BY id")?;
+    let mut query =
+        connection.prepare(&format!("SELECT {TRACK_COLUMNS} FROM tracks ORDER BY id"))?;
     query.query_map([], track_from_row)?.collect()
 }
 
@@ -136,11 +158,12 @@ pub(crate) fn insert_local_tracks(
     paths: &[String],
 ) -> rusqlite::Result<(Vec<Track>, usize)> {
     let mut insert = connection.prepare(
-        "INSERT INTO tracks (source, location) VALUES (?1, ?2)
+        "INSERT INTO tracks (source, location, added_at) VALUES (?1, ?2, unixepoch())
          ON CONFLICT(source, location) DO NOTHING",
     )?;
-    let mut select = connection
-        .prepare("SELECT id, source, location FROM tracks WHERE source = ?1 AND location = ?2")?;
+    let mut select = connection.prepare(&format!(
+        "SELECT {TRACK_COLUMNS} FROM tracks WHERE source = ?1 AND location = ?2"
+    ))?;
     let mut added = 0;
     let mut result = Vec::with_capacity(paths.len());
     for path in paths {
@@ -167,6 +190,45 @@ pub(crate) fn local_track_path(
 
 pub(crate) fn remove_track(connection: &Connection, track_id: i64) -> rusqlite::Result<bool> {
     Ok(connection.execute("DELETE FROM tracks WHERE id = ?1", [track_id])? > 0)
+}
+
+/// Sets 1 to 5 stars, or clears the rating with `None`. Returns false when the track does not exist.
+pub(crate) fn set_rating(
+    connection: &Connection,
+    track_id: i64,
+    rating: Option<u8>,
+) -> rusqlite::Result<bool> {
+    Ok(connection.execute(
+        "UPDATE tracks SET rating = ?1 WHERE id = ?2",
+        params![rating, track_id],
+    )? > 0)
+}
+
+#[derive(serde::Serialize, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PlayStats {
+    pub(crate) play_count: i64,
+    pub(crate) last_played_at: i64,
+}
+
+/// Counts a play of the track now. Returns `None` when the track does not exist.
+pub(crate) fn record_play(
+    connection: &Connection,
+    track_id: i64,
+) -> rusqlite::Result<Option<PlayStats>> {
+    connection
+        .query_row(
+            "UPDATE tracks SET play_count = play_count + 1, last_played_at = unixepoch()
+             WHERE id = ?1 RETURNING play_count, last_played_at",
+            [track_id],
+            |row| {
+                Ok(PlayStats {
+                    play_count: row.get(0)?,
+                    last_played_at: row.get(1)?,
+                })
+            },
+        )
+        .optional()
 }
 
 #[derive(serde::Serialize, Debug, PartialEq)]
@@ -319,6 +381,35 @@ mod tests {
             local_track_path(&connection, first[0].id).unwrap(),
             Some("C:/a.mp3".into())
         );
+    }
+
+    #[test]
+    fn rates_tracks_and_counts_plays() {
+        let mut connection = legacy_library();
+        migrate(&mut connection).unwrap();
+
+        let before = &tracks(&connection).unwrap()[0];
+        assert_eq!(
+            (before.rating, before.play_count, before.last_played_at),
+            (None, 0, None)
+        );
+        assert!(before.added_at > 0);
+
+        assert!(set_rating(&connection, 1, Some(4)).unwrap());
+        assert!(set_rating(&connection, 1, Some(6)).is_err());
+        assert!(!set_rating(&connection, 99, Some(3)).unwrap());
+        let first = record_play(&connection, 1).unwrap().unwrap();
+        let second = record_play(&connection, 1).unwrap().unwrap();
+        assert_eq!((first.play_count, second.play_count), (1, 2));
+        assert_eq!(record_play(&connection, 99).unwrap(), None);
+
+        let after = &tracks(&connection).unwrap()[0];
+        assert_eq!(after.rating, Some(4));
+        assert_eq!(after.play_count, 2);
+        assert_eq!(after.last_played_at, Some(second.last_played_at));
+
+        assert!(set_rating(&connection, 1, None).unwrap());
+        assert_eq!(tracks(&connection).unwrap()[0].rating, None);
     }
 
     #[test]

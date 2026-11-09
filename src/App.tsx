@@ -14,6 +14,7 @@ import { useStatus } from "./hooks/useStatus";
 import { usePlaybackControls } from "./hooks/usePlaybackControls";
 import { useTrackMetadata } from "./hooks/useTrackMetadata";
 import { loadPlaybackPosition } from "./lib/playbackPosition";
+import { findSmartPlaylist, nowInSeconds } from "./lib/smartPlaylists";
 import { trackName, trackTitle, withoutTrack, withTrack } from "./lib/tracks";
 import type { Playlist, Queue, SavedLibrary, Track, TrackId, View } from "./types";
 import "./App.css";
@@ -26,7 +27,11 @@ export default function App() {
   const [importingArchive, setImportingArchive] = useState(false);
 
   const status = useStatus();
-  const player = usePlayer();
+  const player = usePlayer({
+    onPlayed: (track) => void library.recordPlay(track).catch(() => {
+      // A missed play count is not worth interrupting playback for.
+    }),
+  });
   const library = useLibrary({
     onLoaded: restorePlayback,
     onLoadError: () => status.setError("Could not load the library."),
@@ -48,24 +53,30 @@ export default function App() {
     return track ? trackName(track) : "Unknown track";
   };
   const playlist = library.playlists.find((item) => item.id === view);
+  const smart = findSmartPlaylist(view);
   const favorites = new Set(library.favorites);
-  const visibleIds = view === "favorites" ? library.favorites : playlist?.tracks ?? trackIds;
-  const sourceQueue: Queue | undefined = view === "favorites"
-    ? { id: "favorites", tracks: library.favorites }
+  const visibleIds = view === "favorites" ? library.favorites
+    : smart ? smart.select(library.tracks, nowInSeconds()).map((track) => track.id)
+      : playlist?.tracks ?? trackIds;
+  const sourceQueue: Queue | undefined = view === "favorites" || smart
+    ? { id: smart?.id ?? "favorites", tracks: visibleIds }
     : playlist;
   const availableTracks = playlist ? library.tracks.filter((track) => !playlist.tracks.includes(track.id)) : [];
 
   usePlaybackControls(player.audioRef, active, active ? title(active) : undefined,
-    queue.previousTrack, queue.nextTrack, player.selectTrack);
+    queue.previousTrack, queue.nextTrack, player.selectTrack, rateActive);
 
   /** Loads the saved track paused at its saved position, with its collection as the queue source. */
   function restorePlayback(saved: SavedLibrary) {
     const position = loadPlaybackPosition((path) =>
       saved.tracks.find((track) => track.source === "local" && track.location === path)?.id);
     if (!position || !saved.tracks.some((track) => track.id === position.track)) return;
+    const smartSource = findSmartPlaylist(position.source);
     const source = position.source === "favorites"
       ? { id: "favorites" as const, tracks: saved.favorites }
-      : saved.playlists.find((item) => item.id === position.source);
+      : smartSource
+        ? { id: smartSource.id, tracks: smartSource.select(saved.tracks, nowInSeconds()).map((track) => track.id) }
+        : saved.playlists.find((item) => item.id === position.source);
     if (source?.tracks.includes(position.track)) queue.setSource(source);
     player.resume(position.track, position.seconds);
   }
@@ -180,6 +191,25 @@ export default function App() {
     }, "Could not update favorites.");
   }
 
+  function rate(track: TrackId, rating: number | null) {
+    if (busy) return;
+    void status.run(() => library.setRating(track, rating), "Could not save the rating.");
+  }
+
+  /** Keyboard rating: rates the playing track and says so, since the stars may be out of view. */
+  function rateActive(rating: number | null, advance: boolean) {
+    if (active === undefined || busy) return;
+    const track = active;
+    status.setNotice("");
+    void status.run(async () => {
+      await library.setRating(track, rating);
+      status.setNotice(rating === null
+        ? `Cleared the rating for ${title(track)}.`
+        : `Rated ${title(track)} ${rating} ${rating === 1 ? "star" : "stars"}.`);
+    }, "Could not save the rating.");
+    if (advance) queue.playNext();
+  }
+
   function scheduleTrack(track: TrackId, placement: "next" | "end") {
     if (!queue.scheduleTrack(track, placement, sourceQueue)) return;
     status.setNotice(placement === "next"
@@ -214,11 +244,12 @@ export default function App() {
           favorites={favorites} loading={library.loading} busy={busy}
           onPlay={(track) => queue.startTrack(track, sourceQueue)} onToggleFavorite={toggleFavorite}
           onSchedule={scheduleTrack} onSetPlaylistTrack={setPlaylistTrack}
-          onRemove={(track) => void removeTrack(track)} />
+          onRemove={(track) => void removeTrack(track)} onRate={rate} />
       </main>
       <NowPanel active={active} title={active ? title(active) : undefined}
         artist={artist} cover={cover} onCoverError={clearCover}
-        favorite={active !== undefined && favorites.has(active)} busy={busy} onToggleFavorite={toggleFavorite}
+        favorite={active !== undefined && favorites.has(active)} busy={busy}
+        rating={active !== undefined ? tracksById.get(active)?.rating ?? null : null} onRate={rate} onToggleFavorite={toggleFavorite}
         upcoming={queue.upcomingTracks.slice(0, 3).map((id) => ({ id, title: title(id) }))}
         queueOpen={queueOpen} onToggleQueue={toggleQueue} onSelect={player.selectTrack} />
       <PlayerBar player={player} queue={queue} track={active ? tracksById.get(active) : undefined}

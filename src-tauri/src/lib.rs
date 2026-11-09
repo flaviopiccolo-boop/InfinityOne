@@ -135,6 +135,28 @@ fn remove_track(library: State<'_, Library>, track_id: i64) -> Result<(), String
     Ok(())
 }
 
+#[tauri::command]
+fn set_rating(
+    library: State<'_, Library>,
+    track_id: i64,
+    rating: Option<u8>,
+) -> Result<(), String> {
+    if rating.is_some_and(|stars| !(1..=5).contains(&stars)) {
+        return Err("Choose a rating from 1 to 5 stars.".into());
+    }
+    if !db::set_rating(&*library.lock()?, track_id, rating).map_err(error_text)? {
+        return Err("Track not found.".into());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn record_play(library: State<'_, Library>, track_id: i64) -> Result<db::PlayStats, String> {
+    db::record_play(&*library.lock()?, track_id)
+        .map_err(error_text)?
+        .ok_or_else(|| "Track not found.".into())
+}
+
 fn allow_tracks(app: &AppHandle, tracks: &[Track]) -> Result<(), String> {
     let scope = app.asset_protocol_scope();
     for path in tracks.iter().filter_map(Track::local_path) {
@@ -278,6 +300,8 @@ pub fn run() {
             save_tracks,
             import_archive,
             remove_track,
+            set_rating,
+            record_play,
             set_favorite,
             create_playlist,
             rename_playlist,
